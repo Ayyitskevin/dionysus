@@ -388,6 +388,90 @@ def test_pack_approve_and_workspace_export_write_audit_events(tmp_path, monkeypa
     assert "pack.exported" in actions
 
 
+def test_audit_filters_activity_by_action(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    res = signup(client)
+    client.post("/w/blue-plate/settings", data={
+        "company": "Blue Plate Cafe",
+        "email": "ops@blueplate.example",
+        "market": "Charlotte",
+        "service_mix": "dine-in, catering",
+        "brand_voice": "polished and local",
+    }, cookies=res.cookies, follow_redirects=False)
+    client.post("/w/blue-plate/settings/token",
+                cookies=res.cookies, follow_redirects=False)
+
+    page = client.get(
+        "/w/blue-plate/settings?audit_action=workspace.token_rotated#activity",
+        cookies=res.cookies)
+    assert page.status_code == 200
+    assert "Rotated workspace token" in page.text
+    assert "Updated workspace basics" not in page.text
+    assert 'value="workspace.token_rotated" selected' in page.text
+    assert "/w/blue-plate/settings/audit/export.csv?audit_action=workspace.token_rotated" in page.text
+
+
+def test_audit_filters_activity_by_actor_and_date(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    res = signup(client)
+    org = db.one("SELECT * FROM organizations WHERE slug='blue-plate'")
+    owner = db.one("SELECT * FROM users WHERE email='avery@example.com'")
+    db.run("""INSERT INTO audit_events
+              (org_id, actor_user_id, action, summary, details_json, created_at)
+              VALUES (?,?,?,?,?,?)""",
+           (org["id"], None, "system.test", "System test event", "{}", "2026-01-02 12:00:00"))
+    db.run("""INSERT INTO audit_events
+              (org_id, actor_user_id, action, summary, details_json, created_at)
+              VALUES (?,?,?,?,?,?)""",
+           (org["id"], owner["id"], "user.test", "User test event", "{}", "2026-01-02 12:00:00"))
+
+    page = client.get(
+        "/w/blue-plate/settings?audit_actor=system&audit_from=2026-01-02&audit_to=2026-01-02",
+        cookies=res.cookies)
+    assert page.status_code == 200
+    assert "System test event" in page.text
+    assert "User test event" not in page.text
+    assert 'value="system" selected' in page.text
+    assert 'name="audit_from" type="date" value="2026-01-02"' in page.text
+
+
+def test_audit_export_json_and_csv_respect_filters(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    res = signup(client)
+    client.post("/w/blue-plate/settings/token",
+                cookies=res.cookies, follow_redirects=False)
+    client.post("/w/blue-plate/settings", data={
+        "company": "Blue Plate Cafe",
+        "email": "ops@blueplate.example",
+        "market": "Charlotte",
+        "service_mix": "dine-in, catering",
+        "brand_voice": "polished and local",
+    }, cookies=res.cookies, follow_redirects=False)
+
+    json_export = client.get(
+        "/w/blue-plate/settings/audit/export.json?audit_action=workspace.token_rotated",
+        cookies=res.cookies)
+    assert json_export.status_code == 200
+    assert json_export.headers["content-type"].startswith("application/json")
+    assert "blue-plate-audit.json" in json_export.headers["content-disposition"]
+    body = json_export.json()
+    assert len(body) == 1
+    assert body[0]["action"] == "workspace.token_rotated"
+    assert body[0]["details"]["token_tail"]
+
+    csv_export = client.get(
+        "/w/blue-plate/settings/audit/export.csv?audit_action=workspace.token_rotated",
+        cookies=res.cookies)
+    assert csv_export.status_code == 200
+    assert csv_export.headers["content-type"].startswith("text/csv")
+    assert "created_at,actor,action,entity_type,entity_id,summary,details_json" in csv_export.text
+    assert "workspace.token_rotated" in csv_export.text
+    assert "workspace.settings_updated" not in csv_export.text
+
+
 def test_billing_page_shows_trial_when_stripe_unconfigured(tmp_path, monkeypatch):
     configure_tmp_db(tmp_path, monkeypatch)
     client = TestClient(app)

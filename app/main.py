@@ -1,9 +1,11 @@
 """Dionysus / Platekit — Photography AI SaaS for restaurants and photographers."""
 
+import csv
 import datetime as dt
+import io
 import json
 import logging
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlencode, urlparse
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
@@ -364,6 +366,37 @@ def _render_invite(request: Request, invite, *, error: str | None = None):
     })
 
 
+def _audit_filters(request: Request) -> dict:
+    filters = {
+        "action": request.query_params.get("audit_action", "").strip(),
+        "actor": request.query_params.get("audit_actor", "").strip(),
+        "date_from": request.query_params.get("audit_from", "").strip(),
+        "date_to": request.query_params.get("audit_to", "").strip(),
+    }
+    for key in ("date_from", "date_to"):
+        if filters[key]:
+            try:
+                dt.date.fromisoformat(filters[key])
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="audit date must be YYYY-MM-DD") from exc
+    return filters
+
+
+def _audit_query(filters: dict) -> dict:
+    return {
+        "audit_action": filters["action"],
+        "audit_actor": filters["actor"],
+        "audit_from": filters["date_from"],
+        "audit_to": filters["date_to"],
+    }
+
+
+def _audit_export_url(slug: str, fmt: str, filters: dict) -> str:
+    query = {key: value for key, value in _audit_query(filters).items() if value}
+    suffix = f"?{urlencode(query)}" if query else ""
+    return f"/w/{slug}/settings/audit/export.{fmt}{suffix}"
+
+
 def _set_auth_cookies(resp: RedirectResponse, user_id: int, slug: str) -> RedirectResponse:
     resp.set_cookie(security.USER_COOKIE, security.user_cookie(user_id),
                     **_auth_cookie_kwargs())
@@ -554,6 +587,7 @@ async def settings_page(request: Request, slug: str):
                         (invited_id, org["id"]))
         if invite:
             invite_url = _invite_url(invite["token"])
+    audit_filters = _audit_filters(request)
     return templates.TemplateResponse(request, "settings.html", {
         "org": org,
         "user": user,
@@ -567,11 +601,49 @@ async def settings_page(request: Request, slug: str):
         "bridge_count": bridge_count,
         "mise_bridge_armed": bool(config.MISE_IMPORT_TOKEN),
         "access_token_tail": org["access_token"][-6:],
-        "audit_events": audit.recent_for_org(org["id"]),
+        "audit_events": audit.for_org(org["id"], **audit_filters),
+        "audit_actions": audit.actions_for_org(org["id"]),
+        "audit_actors": audit.actors_for_org(org["id"]),
+        "audit_filters": audit_filters,
+        "audit_export_csv_url": _audit_export_url(slug, "csv", audit_filters),
+        "audit_export_json_url": _audit_export_url(slug, "json", audit_filters),
         "notice": notice,
         "rotated": rotated,
         "revoked": revoked,
     })
+
+
+@app.get("/w/{slug}/settings/audit/export.{fmt}")
+async def export_audit(request: Request, slug: str, fmt: str):
+    org, _, _ = _require_owner(request, slug)
+    filters = _audit_filters(request)
+    events = audit.for_org(org["id"], **filters, limit=5000)
+    filename = f"{slug}-audit.{fmt}"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    if fmt == "json":
+        content = json.dumps(events, indent=2)
+        return Response(content, media_type="application/json", headers=headers)
+    if fmt == "csv":
+        output = io.StringIO()
+        fields = [
+            "created_at", "actor", "action", "entity_type", "entity_id",
+            "summary", "details_json",
+        ]
+        writer = csv.DictWriter(output, fieldnames=fields)
+        writer.writeheader()
+        for event in events:
+            writer.writerow({
+                "created_at": event["created_at"],
+                "actor": event["actor_label"],
+                "action": event["action"],
+                "entity_type": event["entity_type"] or "",
+                "entity_id": event["entity_id"] or "",
+                "summary": event["summary"],
+                "details_json": event["details_json"],
+            })
+        return Response(output.getvalue(), media_type="text/csv; charset=utf-8",
+                        headers=headers)
+    raise HTTPException(status_code=404, detail="unknown export format")
 
 
 @app.post("/w/{slug}/settings")

@@ -158,8 +158,36 @@
     </div>
   </section>
 
-  <section class="band settings-band">
-    <h2>Activity trail</h2>
+  <section class="band settings-band" id="activity">
+    <div class="section-row">
+      <h2>Activity trail</h2>
+      <div class="settings-actions">
+        <a class="button secondary" href="{{ audit_export_csv_url }}">CSV</a>
+        <a class="button secondary" href="{{ audit_export_json_url }}">JSON</a>
+      </div>
+    </div>
+    <form method="get" action="/w/{{ org.slug }}/settings" class="audit-filters">
+      <label>Action
+        <select name="audit_action">
+          <option value="">All actions</option>
+          {% for action in audit_actions %}
+          <option value="{{ action }}" {% if audit_filters.action == action %}selected{% endif %}>{{ action }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Actor
+        <select name="audit_actor">
+          <option value="">All actors</option>
+          {% for actor in audit_actors %}
+          <option value="{{ actor.value }}" {% if audit_filters.actor == actor.value %}selected{% endif %}>{{ actor.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>From <input name="audit_from" type="date" value="{{ audit_filters.date_from }}"></label>
+      <label>To <input name="audit_to" type="date" value="{{ audit_filters.date_to }}"></label>
+      <button class="secondary">Filter</button>
+      <a class="small-link" href="/w/{{ org.slug }}/settings#activity">Clear</a>
+    </form>
     <div class="audit-list">
       {% for event in audit_events %}
       <article class="audit-row">
@@ -171,8 +199,8 @@
       </article>
       {% else %}
       <div class="empty-state">
-        <h3>No activity yet</h3>
-        <p>Owner actions and billing state changes will appear here.</p>
+        <h3>No activity found</h3>
+        <p>No activity matches the current filters.</p>
       </div>
       {% endfor %}
     </div>
