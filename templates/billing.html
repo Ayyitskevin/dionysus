@@ -4,6 +4,17 @@
 <section class="page">
   <p class="eyebrow">{{ org.company or org.name }}</p>
   <h1>Billing</h1>
+  {% if checkout_status == "success" %}
+  <div class="notice success">
+    <strong>Checkout returned successfully.</strong>
+    <span>{% if subscription.status == "active" %}Your subscription is active.{% else %}Stripe will update this workspace as soon as the subscription webhook arrives.{% endif %}</span>
+  </div>
+  {% elif checkout_status == "cancel" %}
+  <div class="notice warning">
+    <strong>Checkout was canceled.</strong>
+    <span>No billing changes were made. You can reopen Stripe checkout whenever you are ready.</span>
+  </div>
+  {% endif %}
   <article class="card price">
     <h2>{{ subscription.plan_meta.name }}</h2>
     <strong>{{ subscription.plan_meta.price_cents|money }}/mo</strong>

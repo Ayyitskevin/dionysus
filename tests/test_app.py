@@ -16,6 +16,7 @@ def configure_tmp_db(tmp_path, monkeypatch):
     config.DATA_DIR = tmp_path
     config.DB_PATH = tmp_path / "dionysus.db"
     config.MISE_IMPORT_TOKEN = "mise-test"
+    config.BASE_URL = "http://localhost:8450"
     config.COOKIE_SECURE = False
     config.STRIPE_SECRET_KEY = ""
     config.STRIPE_PRICE_RESTAURANT_STARTER = ""
@@ -314,9 +315,13 @@ def test_pack_share_page_and_exports(tmp_path, monkeypatch):
     share = client.post(f"/w/blue-plate/packs/{pack['id']}/share",
                         cookies=cookies, follow_redirects=False)
     assert share.status_code == 303
-    assert share.headers["location"].startswith("/share/")
-    token = share.headers["location"].rsplit("/", 1)[-1]
-    assert db.one("SELECT share_token FROM content_packs WHERE id=?", (pack["id"],))["share_token"] == token
+    assert share.headers["location"] == f"/w/blue-plate?shared={pack['id']}#pack-{pack['id']}"
+    token = db.one("SELECT share_token FROM content_packs WHERE id=?", (pack["id"],))["share_token"]
+    assert token
+    workspace = client.get(share.headers["location"], cookies=cookies)
+    assert workspace.status_code == 200
+    assert "Share link ready" in workspace.text
+    assert f"http://localhost:8450/share/{token}" in workspace.text
 
     public = client.get(f"/share/{token}")
     assert public.status_code == 200
@@ -462,6 +467,24 @@ def test_workspace_surfaces_upgrade_prompt_for_locked_recipe(tmp_path, monkeypat
     page = client.get("/w/blue-plate", cookies=res.cookies)
     assert page.status_code == 200
     assert "Unlock Seasonal Press Kit with Restaurant Growth" in page.text
+
+
+def test_billing_checkout_return_banners(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    res = signup(client)
+
+    success = client.get("/w/blue-plate/billing?checkout=success",
+                         cookies=res.cookies)
+    assert success.status_code == 200
+    assert "Checkout returned successfully." in success.text
+    assert "subscription webhook arrives" in success.text
+
+    cancel = client.get("/w/blue-plate/billing?checkout=cancel",
+                        cookies=res.cookies)
+    assert cancel.status_code == 200
+    assert "Checkout was canceled." in cancel.text
+    assert "No billing changes were made" in cancel.text
 
 
 def test_billing_can_switch_trial_plan(tmp_path, monkeypatch):

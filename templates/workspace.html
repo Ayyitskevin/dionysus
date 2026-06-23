@@ -20,7 +20,7 @@
     <p class="eyebrow">Next best action</p>
     {% if latest_pack %}
       <h2>Approve, share, and export this first pack.</h2>
-      <p>This is the production loop: a restaurant-ready strategy pack that can be shared, exported, and surfaced inside Mise for client follow-through.</p>
+      <p>This is the production loop: approve the pack, create a share link, and export copy for client follow-through.</p>
     {% else %}
       <h2>Add one input and generate your first pack.</h2>
       <p>Platekit works best with one clear dish, offer, or client target plus a business goal.</p>
@@ -49,16 +49,41 @@
 
 {% if latest_pack %}
   {% set latest_body = pack_json[latest_pack.id] %}
+  {% set latest_share_url = pack_share_urls.get(latest_pack.id) %}
   <section class="first-value">
     <div>
       <p class="eyebrow">{{ latest_pack.recipe_name }} · {{ latest_pack.status }}</p>
       <h2>{{ latest_pack.title }}</h2>
       <p>{{ latest_body.strategy }}</p>
+      <ol class="activation-list" aria-label="Pack activation steps">
+        <li class="{% if latest_pack.status in ('approved', 'exported') %}done{% else %}current{% endif %}">
+          <strong>Approve</strong><span>{% if latest_pack.status == "draft" %}Review and approve the generated pack.{% else %}Approved for client-facing use.{% endif %}</span>
+        </li>
+        <li class="{% if latest_share_url %}done{% elif latest_pack.status in ('approved', 'exported') %}current{% endif %}">
+          <strong>Share</strong><span>{% if latest_share_url %}Public client link is ready.{% else %}Create a reusable public share link.{% endif %}</span>
+        </li>
+        <li class="{% if latest_pack.exported_at %}done{% elif latest_share_url %}current{% endif %}">
+          <strong>Export</strong><span>{% if latest_pack.exported_at %}Exported for handoff.{% else %}Download Markdown or copy plain text when ready.{% endif %}</span>
+        </li>
+      </ol>
+      {% if latest_share_url %}
+      <div class="share-strip {% if shared_pack_id == latest_pack.id %}is-new{% endif %}">
+        <div>
+          <strong>{% if shared_pack_id == latest_pack.id %}Share link ready{% else %}Share link{% endif %}</strong>
+          <input readonly value="{{ latest_share_url }}" aria-label="Share link for {{ latest_pack.title }}">
+        </div>
+        <a class="button secondary" href="{{ latest_share_url }}">Open share page</a>
+      </div>
+      {% endif %}
       <div class="first-actions">
         {% if latest_pack.status == "draft" %}
         <form method="post" action="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/approve"><button>Approve pack</button></form>
         {% endif %}
-        <form method="post" action="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/share"><button class="secondary">Open share page</button></form>
+        {% if latest_share_url %}
+        <a class="button secondary" href="{{ latest_share_url }}">Open share page</a>
+        {% else %}
+        <form method="post" action="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/share"><button class="secondary">Create share link</button></form>
+        {% endif %}
         <a class="button ghost" href="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/export.md">Export Markdown</a>
         <a class="button ghost" href="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/export.txt">Copy text</a>
       </div>
@@ -145,7 +170,8 @@
   <h2>Generated packs</h2>
   {% for pack in packs %}
     {% set body = pack_json[pack.id] %}
-    <article id="pack-{{ pack.id }}" class="pack">
+    {% set share_url = pack_share_urls.get(pack.id) %}
+    <article id="pack-{{ pack.id }}" class="pack {% if shared_pack_id == pack.id %}shared-now{% endif %}">
       <header>
         <div>
           <p class="eyebrow">{{ pack.recipe_name }} · {{ pack.ai_model }}</p>
@@ -156,11 +182,24 @@
           {% if pack.status == "draft" %}
           <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/approve"><button class="ghost">Approve</button></form>
           {% endif %}
+          {% if share_url %}
+          <a class="button" href="{{ share_url }}">Open share</a>
+          {% else %}
           <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/share"><button>Share</button></form>
+          {% endif %}
           <a class="button secondary" href="/w/{{ org.slug }}/packs/{{ pack.id }}/export.md">Markdown</a>
           <a class="button secondary" href="/w/{{ org.slug }}/packs/{{ pack.id }}/export.txt">Text</a>
         </div>
       </header>
+      {% if share_url %}
+      <div class="share-strip compact {% if shared_pack_id == pack.id %}is-new{% endif %}">
+        <div>
+          <strong>{% if shared_pack_id == pack.id %}Share link ready{% else %}Share link{% endif %}</strong>
+          <input readonly value="{{ share_url }}" aria-label="Share link for {{ pack.title }}">
+        </div>
+        <a class="button secondary" href="{{ share_url }}">Open</a>
+      </div>
+      {% endif %}
       <section class="pack-section">
         <h4>Strategy Brief</h4>
         <p>{{ body.strategy }}</p>

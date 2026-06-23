@@ -257,6 +257,11 @@ async def workspace(request: Request, slug: str):
                        FROM content_packs cp JOIN content_recipes cr ON cr.id=cp.recipe_id
                        WHERE cp.org_id=? ORDER BY cp.created_at DESC""", (org["id"],))
     latest_pack = packs[0] if packs else None
+    shared_pack_raw = request.query_params.get("shared", "")
+    try:
+        shared_pack_id = int(shared_pack_raw)
+    except ValueError:
+        shared_pack_id = 0
     sub = billing.checkout_state(org)
     limit = plans.pack_limit(sub["plan"])
     period = dt.date.today().strftime("%Y-%m")
@@ -277,6 +282,11 @@ async def workspace(request: Request, slug: str):
         "upgrade_recipes": upgrade_recipes,
         "plans_by_key": plans.PLANS,
         "pack_json": {p["id"]: json.loads(p["body_json"]) for p in packs},
+        "pack_share_urls": {
+            p["id"]: f"{config.BASE_URL}/share/{p['share_token']}"
+            for p in packs if p["share_token"]
+        },
+        "shared_pack_id": shared_pack_id,
     })
 
 
@@ -355,8 +365,8 @@ async def share_pack(request: Request, slug: str, pack_id: int):
     pack = pack_utils.get_for_org(pack_id, org["id"])
     if not pack:
         raise HTTPException(status_code=404, detail="pack not found")
-    token = pack_utils.ensure_share_token(pack_id)
-    return RedirectResponse(f"/share/{token}", status_code=303)
+    pack_utils.ensure_share_token(pack_id)
+    return RedirectResponse(f"/w/{slug}?shared={pack_id}#pack-{pack_id}", status_code=303)
 
 
 def _export_response(pack, fmt: str):
@@ -424,11 +434,15 @@ async def billing_page(request: Request, slug: str):
     suggested_plan = request.query_params.get("plan") or ""
     if suggested_plan not in plans.PLANS:
         suggested_plan = ""
+    checkout_status = request.query_params.get("checkout", "")
+    if checkout_status not in ("success", "cancel"):
+        checkout_status = ""
     return templates.TemplateResponse(request, "billing.html", {
         "org": org,
         "subscription": billing.checkout_state(org),
         "plans": plans.all_plans(),
         "suggested_plan": suggested_plan,
+        "checkout_status": checkout_status,
     })
 
 
