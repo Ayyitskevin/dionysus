@@ -111,10 +111,10 @@ async def login(request: Request, email: str = Form(...), password: str = Form(.
     target = f"/w/{member['slug']}" if member else "/"
     resp = RedirectResponse(target, status_code=303)
     resp.set_cookie(security.USER_COOKIE, security.user_cookie(user["id"]),
-                    max_age=60 * 60 * 24 * 90, httponly=True, samesite="lax", path="/")
+                    **_auth_cookie_kwargs())
     if member:
         resp.set_cookie(security.WORKSPACE_COOKIE, security.workspace_cookie(member["slug"]),
-                        max_age=60 * 60 * 24 * 90, httponly=True, samesite="lax", path="/")
+                        **_auth_cookie_kwargs())
     return resp
 
 
@@ -155,11 +155,21 @@ def _require_workspace(request: Request, slug: str):
     raise HTTPException(status_code=403, detail="workspace access required")
 
 
+def _auth_cookie_kwargs() -> dict:
+    return {
+        "max_age": 60 * 60 * 24 * 90,
+        "httponly": True,
+        "samesite": "lax",
+        "path": "/",
+        "secure": config.COOKIE_SECURE,
+    }
+
+
 def _set_auth_cookies(resp: RedirectResponse, user_id: int, slug: str) -> RedirectResponse:
     resp.set_cookie(security.USER_COOKIE, security.user_cookie(user_id),
-                    max_age=60 * 60 * 24 * 90, httponly=True, samesite="lax", path="/")
+                    **_auth_cookie_kwargs())
     resp.set_cookie(security.WORKSPACE_COOKIE, security.workspace_cookie(slug),
-                    max_age=60 * 60 * 24 * 90, httponly=True, samesite="lax", path="/")
+                    **_auth_cookie_kwargs())
     return resp
 
 

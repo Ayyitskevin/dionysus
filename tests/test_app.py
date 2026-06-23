@@ -16,6 +16,7 @@ def configure_tmp_db(tmp_path, monkeypatch):
     config.DATA_DIR = tmp_path
     config.DB_PATH = tmp_path / "dionysus.db"
     config.MISE_IMPORT_TOKEN = "mise-test"
+    config.COOKIE_SECURE = False
     config.STRIPE_SECRET_KEY = ""
     config.STRIPE_PRICE_RESTAURANT_STARTER = ""
     config.STRIPE_PRICE_RESTAURANT_GROWTH = ""
@@ -92,6 +93,27 @@ def test_signup_workspace_generate_pack(tmp_path, monkeypatch):
     pack = db.one("SELECT * FROM content_packs")
     assert pack and "Spring agnolotti" in pack["body_json"]
     assert "fill weekday reservations" in pack["body_json"]
+
+
+def test_auth_cookies_use_secure_flag_when_configured(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    from app import config
+    config.COOKIE_SECURE = True
+    client = TestClient(app)
+
+    res = signup(client)
+    cookies = res.headers.get_list("set-cookie")
+    assert len(cookies) == 2
+    assert all("Secure" in cookie for cookie in cookies)
+    assert all("HttpOnly" in cookie for cookie in cookies)
+
+    login = client.post("/login", data={
+        "email": "avery@example.com",
+        "password": "correct-horse",
+    }, follow_redirects=False)
+    login_cookies = login.headers.get_list("set-cookie")
+    assert len(login_cookies) == 2
+    assert all("Secure" in cookie for cookie in login_cookies)
 
 
 def test_login_restores_workspace_access(tmp_path, monkeypatch):
