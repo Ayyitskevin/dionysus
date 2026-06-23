@@ -6,11 +6,11 @@ import logging
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import billing, config, db, jobs, plans, readiness, recipes, security
+from . import billing, config, db, jobs, packs as pack_utils, plans, readiness, recipes, security
 from .render import ROOT, templates
 
 logging.basicConfig(level=logging.INFO,
@@ -295,6 +295,86 @@ async def generate_pack(request: Request, slug: str, campaign_id: int,
             raise HTTPException(status_code=402, detail="monthly pack limit reached")
     jobs.enqueue_generate(campaign_id, recipe_id)
     return RedirectResponse(f"/w/{slug}#packs", status_code=303)
+
+
+@app.post("/w/{slug}/packs/{pack_id}/approve")
+async def approve_pack(request: Request, slug: str, pack_id: int):
+    org, _ = _require_workspace(request, slug)
+    pack = pack_utils.get_for_org(pack_id, org["id"])
+    if not pack:
+        raise HTTPException(status_code=404, detail="pack not found")
+    db.run("""UPDATE content_packs SET status='approved', approved_at=datetime('now'),
+              updated_at=datetime('now') WHERE id=?""", (pack_id,))
+    return RedirectResponse(f"/w/{slug}#pack-{pack_id}", status_code=303)
+
+
+@app.post("/w/{slug}/packs/{pack_id}/share")
+async def share_pack(request: Request, slug: str, pack_id: int):
+    org, _ = _require_workspace(request, slug)
+    pack = pack_utils.get_for_org(pack_id, org["id"])
+    if not pack:
+        raise HTTPException(status_code=404, detail="pack not found")
+    token = pack_utils.ensure_share_token(pack_id)
+    return RedirectResponse(f"/share/{token}", status_code=303)
+
+
+def _export_response(pack, fmt: str):
+    if fmt == "md":
+        content = pack_utils.markdown(pack)
+        media_type = "text/markdown; charset=utf-8"
+        ext = "md"
+    elif fmt == "txt":
+        content = pack_utils.plain_text(pack)
+        media_type = "text/plain; charset=utf-8"
+        ext = "txt"
+    elif fmt == "json":
+        content = json.dumps(pack_utils.body(pack), indent=2)
+        media_type = "application/json"
+        ext = "json"
+    else:
+        raise HTTPException(status_code=404, detail="unknown export format")
+    db.run("""UPDATE content_packs SET status='exported', exported_at=datetime('now'),
+              updated_at=datetime('now') WHERE id=?""", (pack["id"],))
+    headers = {"Content-Disposition":
+               f'attachment; filename="{pack_utils.filename(pack, ext)}"'}
+    return Response(content, media_type=media_type, headers=headers)
+
+
+@app.get("/w/{slug}/packs/{pack_id}/export.{fmt}")
+async def export_pack(request: Request, slug: str, pack_id: int, fmt: str):
+    org, _ = _require_workspace(request, slug)
+    pack = pack_utils.get_for_org(pack_id, org["id"])
+    if not pack:
+        raise HTTPException(status_code=404, detail="pack not found")
+    return _export_response(pack, fmt)
+
+
+@app.get("/share/{token}", response_class=HTMLResponse)
+async def shared_pack(request: Request, token: str):
+    pack = pack_utils.get_by_token(token)
+    if not pack:
+        raise HTTPException(status_code=404, detail="shared pack not found")
+    return templates.TemplateResponse(request, "shared_pack.html", {
+        "pack": pack,
+        "body": pack_utils.body(pack),
+        "markdown": pack_utils.markdown(pack),
+    })
+
+
+@app.get("/share/{token}/export.{fmt}")
+async def export_shared_pack(token: str, fmt: str):
+    pack = pack_utils.get_by_token(token)
+    if not pack:
+        raise HTTPException(status_code=404, detail="shared pack not found")
+    return _export_response(pack, fmt)
+
+
+@app.get("/share/{token}/copy.txt", response_class=PlainTextResponse)
+async def copy_shared_pack(token: str):
+    pack = pack_utils.get_by_token(token)
+    if not pack:
+        raise HTTPException(status_code=404, detail="shared pack not found")
+    return pack_utils.plain_text(pack)
 
 
 @app.get("/w/{slug}/billing", response_class=HTMLResponse)

@@ -97,15 +97,24 @@
   <h2>Generated packs</h2>
   {% for pack in packs %}
     {% set body = pack_json[pack.id] %}
-    <article class="pack">
+    <article id="pack-{{ pack.id }}" class="pack">
       <header>
         <div>
           <p class="eyebrow">{{ pack.recipe_name }} · {{ pack.ai_model }}</p>
           <h3>{{ pack.title }}</h3>
         </div>
-        <span>{{ pack.status }}</span>
+        <div class="pack-actions">
+          <span>{{ pack.status }}</span>
+          <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/approve"><button class="ghost">Approve</button></form>
+          <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/share"><button>Share</button></form>
+          <a class="button secondary" href="/w/{{ org.slug }}/packs/{{ pack.id }}/export.md">Markdown</a>
+          <a class="button secondary" href="/w/{{ org.slug }}/packs/{{ pack.id }}/export.txt">Text</a>
+        </div>
       </header>
-      <p>{{ body.strategy }}</p>
+      <section class="pack-section">
+        <h4>Strategy Brief</h4>
+        <p>{{ body.strategy }}</p>
+      </section>
       <div class="pack-grid">
         <div><h4>Shot list</h4><ul>{% for x in body.shot_list %}<li>{{ x }}</li>{% endfor %}</ul></div>
         <div><h4>Captions</h4><ul>{% for x in body.captions %}<li>{{ x }}</li>{% endfor %}</ul></div>

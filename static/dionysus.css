@@ -195,6 +195,14 @@ label { display: grid; gap: 0.4rem; font-size: 0.9rem; font-weight: 700; }
   border-bottom: 1px solid var(--line);
   margin-bottom: 1rem;
 }
+.pack-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+}
+.pack-actions form { margin: 0; }
 .pack h3 { margin: 0 0 0.75rem; }
 .pack-grid {
   display: grid;
@@ -202,7 +210,24 @@ label { display: grid; gap: 0.4rem; font-size: 0.9rem; font-weight: 700; }
   gap: 1rem;
 }
 .pack-grid h4 { color: var(--blue); margin-bottom: 0.4rem; }
-.pack-grid ul, .price ul { padding-left: 1.1rem; }
+.pack-grid ul, .price ul, .pack-section ul { padding-left: 1.1rem; }
+.pack-detail {
+  display: grid;
+  gap: 1rem;
+}
+.pack-section {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+}
+.pack-section h2, .pack-section h4 { margin-top: 0; color: var(--blue); }
+.copy-block textarea {
+  min-height: 360px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+}
+.shared-hero { background: #e8ece5; }
 .empty-state {
   border: 1px dashed var(--line);
   border-radius: 8px;
