@@ -945,7 +945,8 @@ async def add_campaign(request: Request, slug: str, title: str = Form(...),
 
 @app.post("/w/{slug}/campaigns/{campaign_id}/generate")
 async def generate_pack(request: Request, slug: str, campaign_id: int,
-                        recipe_id: int = Form(...)):
+                        recipe_id: int = Form(...),
+                        argus_run_id: int | None = Form(None)):
     org, _ = _require_workspace(request, slug)
     campaign = db.one("SELECT * FROM campaigns WHERE id=? AND org_id=?",
                       (campaign_id, org["id"]))
@@ -965,7 +966,7 @@ async def generate_pack(request: Request, slug: str, campaign_id: int,
                       (org["id"], period))["n"]
         if used >= limit:
             raise HTTPException(status_code=402, detail="monthly pack limit reached")
-    jobs.enqueue_generate(campaign_id, recipe_id)
+    jobs.enqueue_generate(campaign_id, recipe_id, argus_run_id=argus_run_id)
     return RedirectResponse(f"/w/{slug}#packs", status_code=303)
 
 

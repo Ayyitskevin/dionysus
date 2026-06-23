@@ -7,15 +7,18 @@ product routes. MVP executes immediately for predictable local development.
 import json
 import logging
 
-from . import db, generator, recipes
+from . import argus, db, generator, recipes
 
 log = logging.getLogger("dionysus.jobs")
 
 
-def enqueue_generate(campaign_id: int, recipe_id: int) -> int:
+def enqueue_generate(campaign_id: int, recipe_id: int, *, argus_run_id: int | None = None) -> int:
     job_id = db.run("INSERT INTO jobs (kind, payload) VALUES (?,?)",
                     ("generate_pack", json.dumps({
-                        "campaign_id": campaign_id, "recipe_id": recipe_id})))
+                        "campaign_id": campaign_id,
+                        "recipe_id": recipe_id,
+                        "argus_run_id": argus_run_id,
+                    })))
     execute(job_id)
     return job_id
 
@@ -33,7 +36,14 @@ def execute(job_id: int) -> None:
         if not campaign or not recipe:
             raise RuntimeError("campaign or recipe missing")
         org = db.one("SELECT * FROM organizations WHERE id=?", (campaign["org_id"],))
-        pack = generator.build_pack(org, campaign, recipe)
+        argus_ctx = None
+        run_id = payload.get("argus_run_id")
+        if run_id:
+            try:
+                argus_ctx = argus.fetch_run_context(int(run_id))
+            except argus.ArgusError:
+                log.warning("argus enrichment skipped for run %s", run_id, exc_info=True)
+        pack = generator.build_pack(org, campaign, recipe, argus_context=argus_ctx)
         db.run("""INSERT INTO content_packs
                   (org_id, campaign_id, recipe_id, title, body_json, ai_model, ai_draft_original)
                   VALUES (?,?,?,?,?,?,?)""",

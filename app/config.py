@@ -19,6 +19,11 @@ ADMIN_PASSWORD = os.environ.get("DIONYSUS_ADMIN_PASSWORD", "dev")
 
 MISE_IMPORT_TOKEN = os.environ.get("DIONYSUS_MISE_IMPORT_TOKEN", "")
 
+# Argus vision metadata for pack enrichment (optional).
+ARGUS_URL = os.environ.get("DIONYSUS_ARGUS_URL", "").rstrip("/")
+ARGUS_API_TOKEN = os.environ.get("DIONYSUS_ARGUS_API_TOKEN", "")
+ARGUS_TIMEOUT = int(os.environ.get("DIONYSUS_ARGUS_TIMEOUT", "15"))
+
 STRIPE_SECRET_KEY = os.environ.get("DIONYSUS_STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.environ.get("DIONYSUS_STRIPE_WEBHOOK_SECRET", "")
 STRIPE_PRICE_RESTAURANT_STARTER = os.environ.get("DIONYSUS_STRIPE_PRICE_RESTAURANT_STARTER", "")
