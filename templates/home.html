@@ -10,35 +10,35 @@
   <form id="signup" class="signup onboarding" method="post" action="/signup">
     <h2>Build the first pack</h2>
     <div class="form-grid">
-      <label>Name <input name="name" required></label>
-      <label>Email <input name="email" type="email" required></label>
+      <label>Name <input name="name" value="{{ signup.name }}" required></label>
+      <label>Email <input name="email" type="email" value="{{ signup.email }}" required></label>
     </div>
     <label>Password <input name="password" type="password" minlength="8" required></label>
-    <label>Business or studio <input name="company" placeholder="Blue Plate or Avery Photo Co."></label>
+    <label>Business or studio <input name="company" value="{{ signup.company }}" placeholder="Blue Plate or Avery Photo Co."></label>
     <div class="form-grid">
       <label>I am
-        <select name="audience">
-          <option value="restaurant">Restaurant owner/operator</option>
-          <option value="photographer">Photographer/studio</option>
+        <select name="audience" id="signup-audience">
+          <option value="restaurant" {% if signup.audience == "restaurant" %}selected{% endif %}>Restaurant owner/operator</option>
+          <option value="photographer" {% if signup.audience == "photographer" %}selected{% endif %}>Photographer/studio</option>
         </select>
       </label>
       <label>Plan
-        <select name="plan">
+        <select name="plan" id="signup-plan">
           {% for plan in plans %}
-          <option value="{{ plan.key }}">{{ plan.name }} · {{ plan.price_cents|money }}/mo</option>
+          <option value="{{ plan.key }}" data-audience="{{ plan.audience }}" {% if signup.plan == plan.key %}selected{% endif %}>{{ plan.name }} · {{ plan.price_cents|money }}/mo</option>
           {% endfor %}
         </select>
       </label>
     </div>
     <div class="form-grid">
-      <label>Market <input name="market" placeholder="Asheville, Charlotte, Raleigh"></label>
-      <label>Service focus <input name="service_mix" placeholder="dine-in, delivery, catering, retainers"></label>
+      <label>Market <input name="market" value="{{ signup.market }}" placeholder="Asheville, Charlotte, Raleigh"></label>
+      <label>Service focus <input name="service_mix" value="{{ signup.service_mix }}" placeholder="dine-in, delivery, catering, retainers"></label>
     </div>
-    <label>Brand voice <input name="brand_voice" placeholder="warm, premium, playful, chef-led"></label>
-    <label>First dish, offer, or client target <input name="first_item" placeholder="Spring agnolotti, brunch launch, multi-location restaurant group"></label>
-    <label>Useful context <textarea name="first_item_note" placeholder="Ingredients, margin, client problem, visual direction, audience"></textarea></label>
-    <label>First campaign goal <textarea name="campaign_goal" placeholder="Fill weekday reservations, refresh delivery-app listings, pitch a monthly content retainer"></textarea></label>
-    <label>Launch date <input type="date" name="launch_date"></label>
+    <label>Brand voice <input name="brand_voice" value="{{ signup.brand_voice }}" placeholder="warm, premium, playful, chef-led"></label>
+    <label>First dish, offer, or client target <input name="first_item" value="{{ signup.first_item }}" placeholder="Spring agnolotti, brunch launch, multi-location restaurant group"></label>
+    <label>Useful context <textarea name="first_item_note" placeholder="Ingredients, margin, client problem, visual direction, audience">{{ signup.first_item_note }}</textarea></label>
+    <label>First campaign goal <textarea name="campaign_goal" placeholder="Fill weekday reservations, refresh delivery-app listings, pitch a monthly content retainer">{{ signup.campaign_goal }}</textarea></label>
+    <label>Launch date <input type="date" name="launch_date" value="{{ signup.launch_date }}"></label>
     <button type="submit">Create my first pack</button>
     <a class="small-link" href="/login">Log in instead</a>
   </form>
@@ -82,4 +82,25 @@
     <p>Package pre-production thinking, campaign strategy, captions, usage prompts, and retainer upsells as a paid client deliverable.</p>
   </div>
 </section>
+<script>
+(() => {
+  const audience = document.getElementById("signup-audience");
+  const plan = document.getElementById("signup-plan");
+  if (!audience || !plan) return;
+  const syncPlans = () => {
+    let firstVisible = "";
+    for (const option of plan.options) {
+      const matches = option.dataset.audience === audience.value;
+      option.disabled = !matches;
+      option.hidden = !matches;
+      if (matches && !firstVisible) firstVisible = option.value;
+    }
+    if (plan.selectedOptions[0]?.disabled && firstVisible) {
+      plan.value = firstVisible;
+    }
+  };
+  audience.addEventListener("change", syncPlans);
+  syncPlans();
+})();
+</script>
 {% endblock %}

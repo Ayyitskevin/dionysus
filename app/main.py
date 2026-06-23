@@ -56,11 +56,33 @@ async def readiness_check():
     return readiness.summary()
 
 
+def _signup_defaults(request: Request) -> dict:
+    audience = request.query_params.get("audience", "restaurant").strip().lower()
+    if audience not in ("restaurant", "photographer"):
+        audience = "restaurant"
+    plan = plans.normalize_plan(request.query_params.get("plan", ""), audience)
+    return {
+        "name": request.query_params.get("name", ""),
+        "email": request.query_params.get("email", ""),
+        "company": request.query_params.get("company", ""),
+        "audience": audience,
+        "plan": plan,
+        "market": request.query_params.get("market", ""),
+        "service_mix": request.query_params.get("service_mix", ""),
+        "brand_voice": request.query_params.get("brand_voice", ""),
+        "first_item": request.query_params.get("first_item", ""),
+        "first_item_note": request.query_params.get("first_item_note", ""),
+        "campaign_goal": request.query_params.get("campaign_goal", ""),
+        "launch_date": request.query_params.get("launch_date", ""),
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse(request, "home.html", {
         "recipes": recipes.active()[:4],
         "plans": plans.all_plans(),
+        "signup": _signup_defaults(request),
     })
 
 

@@ -37,11 +37,11 @@ def all_plans() -> list[dict]:
 
 
 def normalize_plan(plan: str, audience: str) -> str:
-    if plan in PLANS:
+    if plan in PLANS and PLANS[plan]["audience"] == audience:
         return plan
     if audience == "photographer":
         return "photographer_studio"
-    if plan == "growth":
+    if plan in {"growth", "restaurant_growth"}:
         return "restaurant_growth"
     return "restaurant_starter"
 

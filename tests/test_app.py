@@ -43,6 +43,32 @@ def signup(client, **overrides):
     return client.post("/signup", data=data, follow_redirects=False)
 
 
+def test_home_prefills_signup_from_query_params(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    res = client.get("/?name=Avery&email=avery%40example.com&company=Blue+Plate&audience=restaurant&plan=restaurant_growth&market=Asheville&first_item=Spring+agnolotti")
+    assert res.status_code == 200
+    assert 'name="name" value="Avery"' in res.text
+    assert 'name="email" type="email" value="avery@example.com"' in res.text
+    assert 'name="company" value="Blue Plate"' in res.text
+    assert 'value="restaurant_growth" data-audience="restaurant" selected' in res.text
+    assert 'name="market" value="Asheville"' in res.text
+    assert 'name="first_item" value="Spring agnolotti"' in res.text
+
+
+def test_signup_normalizes_plan_to_selected_audience(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    res = signup(client, audience="photographer", plan="restaurant_starter",
+                 company="Avery Photo Co.", email="avery-photo@example.com")
+    assert res.status_code == 303
+    org = db.one("SELECT * FROM organizations WHERE slug='avery-photo-co'")
+    assert org["audience"] == "photographer"
+    assert org["plan"] == "photographer_studio"
+    sub = db.one("SELECT * FROM subscriptions WHERE org_id=?", (org["id"],))
+    assert sub["plan"] == "photographer_studio"
+
+
 def test_signup_workspace_generate_pack(tmp_path, monkeypatch):
     configure_tmp_db(tmp_path, monkeypatch)
 
