@@ -307,3 +307,55 @@ label { display: grid; gap: 0.4rem; font-size: 0.9rem; font-weight: 700; }
 @media (max-width: 880px) {
   .first-value { grid-template-columns: 1fr; }
 }
+
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.usage-card .button, .usage-card .small-link { width: fit-content; }
+.upgrade-strip {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  padding: 1rem clamp(1rem, 4vw, 2rem);
+  background: #17201b;
+  color: white;
+}
+.upgrade-strip div { display: grid; gap: 0.2rem; }
+.upgrade-strip span { color: #d9ded8; }
+.campaign-actions {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 380px;
+}
+.campaign-actions form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.locked-recipe {
+  color: var(--blue);
+  font-weight: 800;
+  font-size: 0.9rem;
+}
+.current-plan {
+  outline: 2px solid var(--leaf);
+}
+.suggested-plan {
+  outline: 2px solid var(--blue);
+}
+.plan-badge {
+  display: inline-flex;
+  width: fit-content;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.4rem 0.65rem;
+  color: var(--leaf);
+  font-weight: 900;
+}
+
+@media (max-width: 880px) {
+  .upgrade-strip, .campaign-actions, .campaign-actions form { display: grid; min-width: 0; }
+}

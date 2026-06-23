@@ -322,3 +322,27 @@ def test_cli_seed_demo_creates_approved_pack_for_mise_bridge(tmp_path, monkeypat
     body = res.json()
     assert len(body["packs"]) == 1
     assert body["packs"][0]["share_url"].startswith("https://platekit.example.com/share/")
+
+
+
+def test_workspace_surfaces_upgrade_prompt_for_locked_recipe(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    res = signup(client, plan="restaurant_starter")
+    page = client.get("/w/blue-plate", cookies=res.cookies)
+    assert page.status_code == 200
+    assert "Unlock Seasonal Press Kit with Restaurant Growth" in page.text
+
+
+def test_billing_can_switch_trial_plan(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    res = signup(client, plan="restaurant_starter")
+    switch = client.post("/w/blue-plate/billing/plan",
+                         data={"plan": "restaurant_growth"},
+                         cookies=res.cookies, follow_redirects=False)
+    assert switch.status_code == 303
+    org = db.one("SELECT * FROM organizations WHERE slug='blue-plate'")
+    sub = db.one("SELECT * FROM subscriptions WHERE org_id=?", (org["id"],))
+    assert org["plan"] == "restaurant_growth"
+    assert sub["plan"] == "restaurant_growth"

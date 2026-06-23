@@ -29,8 +29,23 @@
   <div class="usage-card">
     <strong>{{ subscription.plan_meta.name }}</strong>
     <span>{{ pack_used }}{% if pack_limit is not none %}/{{ pack_limit }}{% else %}/unlimited{% endif %} packs used this month</span>
+    {% if pack_limit is not none and pack_used >= pack_limit and limit_upgrade_plan %}
+      <a class="button secondary" href="/w/{{ org.slug }}/billing?plan={{ limit_upgrade_plan }}">Upgrade for more packs</a>
+    {% else %}
+      <a class="small-link" href="/w/{{ org.slug }}/billing">Manage plan</a>
+    {% endif %}
   </div>
 </section>
+
+{% if pack_limit is not none and pack_used >= pack_limit and limit_upgrade_plan %}
+<section class="upgrade-strip">
+  <div>
+    <strong>Monthly pack limit reached.</strong>
+    <span>Upgrade to {{ plans_by_key[limit_upgrade_plan].name }} for {% if plans_by_key[limit_upgrade_plan].pack_limit is none %}unlimited packs{% else %}more monthly packs{% endif %}.</span>
+  </div>
+  <a class="button secondary" href="/w/{{ org.slug }}/billing?plan={{ limit_upgrade_plan }}">Upgrade plan</a>
+</section>
+{% endif %}
 
 {% if latest_pack %}
   {% set latest_body = pack_json[latest_pack.id] %}
@@ -91,16 +106,25 @@
         <strong>{{ campaign.title }}</strong>
         <p>{{ campaign.goal or "No goal set" }} · {{ campaign.status }}</p>
       </div>
-      <form method="post" action="/w/{{ org.slug }}/campaigns/{{ campaign.id }}/generate">
-        <select name="recipe_id">
-          {% for recipe in recipes %}
-            {% if recipe.audience in ("both", org.audience) %}
-            <option value="{{ recipe.id }}">{{ recipe.name }}</option>
-            {% endif %}
-          {% endfor %}
-        </select>
-        <button>Generate pack</button>
-      </form>
+      <div class="campaign-actions">
+        <form method="post" action="/w/{{ org.slug }}/campaigns/{{ campaign.id }}/generate">
+          <select name="recipe_id">
+            {% for recipe in recipes %}
+              {% if recipe.audience in ("both", org.audience) and not upgrade_recipes[recipe.id] %}
+              <option value="{{ recipe.id }}">{{ recipe.name }}</option>
+              {% endif %}
+            {% endfor %}
+          </select>
+          <button {% if pack_limit is not none and pack_used >= pack_limit %}disabled title="Monthly pack limit reached"{% endif %}>Generate pack</button>
+        </form>
+        {% for recipe in recipes %}
+          {% if recipe.audience in ("both", org.audience) and upgrade_recipes[recipe.id] %}
+          <a class="locked-recipe" href="/w/{{ org.slug }}/billing?plan={{ upgrade_recipes[recipe.id] }}">
+            Unlock {{ recipe.name }} with {{ plans_by_key[upgrade_recipes[recipe.id]].name }}
+          </a>
+          {% endif %}
+        {% endfor %}
+      </div>
     </article>
     {% endfor %}
   </div>

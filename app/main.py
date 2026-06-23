@@ -231,10 +231,19 @@ async def workspace(request: Request, slug: str):
     used = db.one("""SELECT COUNT(*) AS n FROM content_packs
                      WHERE org_id=? AND substr(created_at,1,7)=?""",
                   (org["id"], period))["n"]
+    active_recipes = recipes.active()
+    upgrade_recipes = {
+        r["id"]: plans.upgrade_plan_for_recipe(org["audience"], sub["plan"], r["slug"])
+        for r in active_recipes
+    }
+    limit_upgrade_plan = plans.upgrade_plan_for_limit(org["audience"], sub["plan"])
     return templates.TemplateResponse(request, "workspace.html", {
         "org": org, "user": user, "menu": menu, "campaigns": campaigns,
-        "packs": packs, "latest_pack": latest_pack, "recipes": recipes.active(),
+        "packs": packs, "latest_pack": latest_pack, "recipes": active_recipes,
         "subscription": sub, "pack_limit": limit, "pack_used": used,
+        "limit_upgrade_plan": limit_upgrade_plan,
+        "upgrade_recipes": upgrade_recipes,
+        "plans_by_key": plans.PLANS,
         "pack_json": {p["id"]: json.loads(p["body_json"]) for p in packs},
     })
 
@@ -380,11 +389,35 @@ async def copy_shared_pack(token: str):
 @app.get("/w/{slug}/billing", response_class=HTMLResponse)
 async def billing_page(request: Request, slug: str):
     org, _ = _require_workspace(request, slug)
+    suggested_plan = request.query_params.get("plan") or ""
+    if suggested_plan not in plans.PLANS:
+        suggested_plan = ""
     return templates.TemplateResponse(request, "billing.html", {
         "org": org,
         "subscription": billing.checkout_state(org),
         "plans": plans.all_plans(),
+        "suggested_plan": suggested_plan,
     })
+
+
+@app.post("/w/{slug}/billing/plan")
+async def choose_plan(request: Request, slug: str, plan: str = Form(...),
+                      checkout: str = Form("")):
+    org, _ = _require_workspace(request, slug)
+    plan = plans.normalize_plan(plan, org["audience"])
+    if plans.PLANS[plan]["audience"] != org["audience"]:
+        raise HTTPException(status_code=400, detail="plan does not match workspace")
+    db.run("UPDATE organizations SET plan=? WHERE id=?", (plan, org["id"]))
+    billing.sync_trial_subscription(org["id"], plan)
+    if checkout:
+        fresh = _org_by_slug(slug)
+        url = billing.create_checkout_session(
+            fresh,
+            success_url=f"{config.BASE_URL}/w/{slug}/billing?checkout=success",
+            cancel_url=f"{config.BASE_URL}/w/{slug}/billing?checkout=cancel",
+        )
+        return RedirectResponse(url, status_code=303)
+    return RedirectResponse(f"/w/{slug}/billing", status_code=303)
 
 
 @app.post("/w/{slug}/billing/checkout")

@@ -19,10 +19,29 @@
   <h2>Available plans</h2>
   <div class="grid">
     {% for plan in plans %}
-    <article class="card">
-      <h3>{{ plan.name }}</h3>
-      <p>{{ plan.price_cents|money }}/mo · {{ plan.for }}</p>
-    </article>
+      {% if plan.audience == org.audience %}
+      <article class="card price {% if plan.key == subscription.plan %}current-plan{% elif plan.key == suggested_plan %}suggested-plan{% endif %}">
+        <h3>{{ plan.name }}</h3>
+        {% if plan.key == suggested_plan and plan.key != subscription.plan %}<span class="plan-badge">Recommended upgrade</span>{% endif %}
+        <strong>{{ plan.price_cents|money }}/mo</strong>
+        <p>{{ plan.for }}</p>
+        <ul>
+          {% for feature in plan.features %}<li>{{ feature }}</li>{% endfor %}
+        </ul>
+        {% if plan.key == subscription.plan %}
+          <span class="plan-badge">Current plan</span>
+        {% else %}
+          <form method="post" action="/w/{{ org.slug }}/billing/plan">
+            <input type="hidden" name="plan" value="{{ plan.key }}">
+            {% if subscription.configured %}
+              <button name="checkout" value="1">Upgrade in Stripe</button>
+            {% else %}
+              <button>Switch trial plan</button>
+            {% endif %}
+          </form>
+        {% endif %}
+      </article>
+      {% endif %}
     {% endfor %}
   </div>
 </section>
