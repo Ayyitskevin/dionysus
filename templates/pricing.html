@@ -7,7 +7,7 @@
     {% for plan in plans %}
     <article class="card price">
       <h2>{{ plan.name }}</h2>
-      <strong>{{ plan.price|money }}/mo</strong>
+      <strong>{{ plan.price_cents|money }}/mo</strong>
       <p>{{ plan.for }}</p>
       <ul>
         {% for feature in plan.features %}<li>{{ feature }}</li>{% endfor %}

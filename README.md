@@ -56,6 +56,27 @@ Authorization: Bearer <token>
 That endpoint gives Mise/Odysseus a clean bridge to the latest Dionysus content
 pack without coupling the two apps.
 
+
+
+## SaaS Foundation
+
+The current MVP includes the first paid-product boundary:
+
+- Account signup and login with PBKDF2 password hashes
+- Workspace ownership through `organization_members`
+- Trial subscription rows per workspace
+- Plan-gated content recipes and monthly pack limits
+- Billing page that stays in trial mode until Stripe keys and price IDs are configured
+
+Stripe checkout is intentionally scaffolded, not faked. Configure the keys in
+`ops/env.example`, then wire `POST /w/{slug}/billing/checkout` to create a real
+Checkout Session.
+
+Production starting points:
+
+- `ops/env.example`
+- `ops/dionysus.service`
+
 ## Verification
 
 ```bash

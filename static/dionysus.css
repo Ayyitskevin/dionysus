@@ -167,3 +167,29 @@ label { display: grid; gap: 0.4rem; font-size: 0.9rem; font-weight: 700; }
   .hero { min-height: auto; }
   .row, .row form, .workspace-head { display: grid; min-width: 0; }
 }
+
+
+.auth-page {
+  min-height: calc(100vh - 70px);
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+}
+.small-link {
+  color: var(--blue);
+  font-weight: 800;
+  text-align: center;
+}
+.error {
+  color: var(--tomato);
+  font-weight: 800;
+  margin: 0;
+}
+.muted { color: var(--muted); }
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.head-actions form { margin: 0; }

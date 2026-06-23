@@ -3,11 +3,15 @@
 {% block content %}
 <section class="workspace-head">
   <div>
-    <p class="eyebrow">{{ org.audience }} · {{ org.plan }}</p>
+    <p class="eyebrow">{{ org.audience }} · {{ subscription.plan_meta.name }} · {{ subscription.status }}</p>
     <h1>{{ org.company or org.name }}</h1>
     <p>{{ org.brand_voice or "Add a brand voice, menu items, and a campaign. Then generate a pack." }}</p>
+    <p class="muted">Packs this month: {{ pack_used }}{% if pack_limit is not none %}/{{ pack_limit }}{% else %}/unlimited{% endif %}</p>
   </div>
-  <a class="button" href="#packs">Packs</a>
+  <div class="head-actions">
+    <a class="button" href="/w/{{ org.slug }}/billing">Billing</a>
+    <form method="post" action="/logout"><button>Log out</button></form>
+  </div>
 </section>
 
 <section class="columns">

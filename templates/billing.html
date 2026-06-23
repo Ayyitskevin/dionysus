@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Billing · {{ org.name }}{% endblock %}
+{% block content %}
+<section class="page">
+  <p class="eyebrow">{{ org.company or org.name }}</p>
+  <h1>Billing</h1>
+  <article class="card price">
+    <h2>{{ subscription.plan_meta.name }}</h2>
+    <strong>{{ subscription.plan_meta.price_cents|money }}/mo</strong>
+    <p>Status: {{ subscription.status }}</p>
+    {% if subscription.configured %}
+      <form method="post" action="/w/{{ org.slug }}/billing/checkout">
+        <button>Open Stripe checkout</button>
+      </form>
+    {% else %}
+      <p class="muted">Stripe keys and price IDs are not configured yet. This workspace is in trial mode.</p>
+    {% endif %}
+  </article>
+  <h2>Available plans</h2>
+  <div class="grid">
+    {% for plan in plans %}
+    <article class="card">
+      <h3>{{ plan.name }}</h3>
+      <p>{{ plan.price_cents|money }}/mo · {{ plan.for }}</p>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
