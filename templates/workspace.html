@@ -11,10 +11,13 @@
   <div class="head-actions">
     <a class="button" href="#packs">Latest pack</a>
     <a class="button secondary" href="/w/{{ org.slug }}/billing">Billing</a>
-    {% if user %}
+    {% if can_manage_workspace %}
     <a class="button ghost" href="/w/{{ org.slug }}/settings">Settings</a>
+    <a class="button ghost" href="/w/{{ org.slug }}/support">Support</a>
     {% endif %}
+    {% if user %}
     <form method="post" action="/logout"><button class="ghost">Log out</button></form>
+    {% endif %}
   </div>
 </section>
 

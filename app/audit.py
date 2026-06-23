@@ -97,3 +97,11 @@ def actors_for_org(org_id: int) -> list[dict]:
                 label = f"{row['name']} ({row['email']})"
             actors.append({"value": str(row["actor_user_id"]), "label": label})
     return actors
+
+
+def get_for_org(org_id: int, event_id: int) -> dict | None:
+    row = db.one("""SELECT ae.*, u.name AS actor_name, u.email AS actor_email
+                    FROM audit_events ae
+                    LEFT JOIN users u ON u.id=ae.actor_user_id
+                    WHERE ae.org_id=? AND ae.id=?""", (org_id, event_id))
+    return _event(row) if row else None

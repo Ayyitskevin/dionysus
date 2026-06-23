@@ -114,8 +114,8 @@ def _workspace_page_path(path: str) -> bool:
     parts = [part for part in path.split("/") if part]
     if len(parts) == 2 and parts[0] == "w":
         return True
-    return len(parts) == 3 and parts[0] == "w" and parts[2] in {
-        "billing", "settings"}
+    return len(parts) >= 3 and parts[0] == "w" and parts[2] in {
+        "billing", "settings", "support"}
 
 
 def _should_redirect_to_login(request: Request) -> bool:
@@ -397,6 +397,13 @@ def _audit_export_url(slug: str, fmt: str, filters: dict) -> str:
     return f"/w/{slug}/settings/audit/export.{fmt}{suffix}"
 
 
+def _count_by(rows, key: str, defaults: tuple[str, ...]) -> dict:
+    counts = {value: 0 for value in defaults}
+    for row in rows:
+        counts[row[key]] = row["n"]
+    return counts
+
+
 def _set_auth_cookies(resp: RedirectResponse, user_id: int, slug: str) -> RedirectResponse:
     resp.set_cookie(security.USER_COOKIE, security.user_cookie(user_id),
                     **_auth_cookie_kwargs())
@@ -516,6 +523,9 @@ async def workspace(request: Request, slug: str):
     except ValueError:
         shared_pack_id = 0
     sub = billing.checkout_state(org)
+    current_member = _membership(user["id"], org["id"]) if user else None
+    can_manage_workspace = bool(
+        current_member and current_member["role"] in ("owner", "admin"))
     limit = plans.pack_limit(sub["plan"])
     period = dt.date.today().strftime("%Y-%m")
     used = db.one("""SELECT COUNT(*) AS n FROM content_packs
@@ -540,6 +550,7 @@ async def workspace(request: Request, slug: str):
             for p in packs if p["share_token"]
         },
         "shared_pack_id": shared_pack_id,
+        "can_manage_workspace": can_manage_workspace,
     })
 
 
@@ -610,6 +621,84 @@ async def settings_page(request: Request, slug: str):
         "notice": notice,
         "rotated": rotated,
         "revoked": revoked,
+    })
+
+
+
+@app.get("/w/{slug}/support", response_class=HTMLResponse)
+async def support_dashboard(request: Request, slug: str):
+    org, user, member = _require_owner(request, slug)
+    sub = billing.checkout_state(org)
+    members = db.all_("""SELECT om.user_id, om.role, om.created_at,
+                                u.name, u.email, u.last_login_at
+                         FROM organization_members om
+                         JOIN users u ON u.id=om.user_id
+                         WHERE om.org_id=?
+                         ORDER BY CASE om.role WHEN 'owner' THEN 0
+                                                WHEN 'admin' THEN 1 ELSE 2 END,
+                                  u.email""", (org["id"],))
+    member_counts = _count_by(
+        db.all_("""SELECT role, COUNT(*) AS n FROM organization_members
+                   WHERE org_id=? GROUP BY role""", (org["id"],)),
+        "role", ("owner", "admin", "member"))
+    invite_counts = _count_by(
+        db.all_("""SELECT status, COUNT(*) AS n FROM workspace_invites
+                   WHERE org_id=? GROUP BY status""", (org["id"],)),
+        "status", ("pending", "accepted", "revoked"))
+    pack_counts = _count_by(
+        db.all_("""SELECT status, COUNT(*) AS n FROM content_packs
+                   WHERE org_id=? GROUP BY status""", (org["id"],)),
+        "status", ("draft", "approved", "exported"))
+    recent_invites = db.all_("""SELECT wi.*, inviter.email AS invited_by_email,
+                                       accepter.email AS accepted_by_email
+                                FROM workspace_invites wi
+                                LEFT JOIN users inviter ON inviter.id=wi.invited_by_user_id
+                                LEFT JOIN users accepter ON accepter.id=wi.accepted_by_user_id
+                                WHERE wi.org_id=?
+                                ORDER BY wi.created_at DESC, wi.id DESC
+                                LIMIT 8""", (org["id"],))
+    latest_pack = db.one("""SELECT id, title, status, share_token, created_at
+                            FROM content_packs
+                            WHERE org_id=?
+                            ORDER BY created_at DESC, id DESC
+                            LIMIT 1""", (org["id"],))
+    shared_count = db.one("""SELECT COUNT(*) AS n FROM content_packs
+                             WHERE org_id=? AND share_token IS NOT NULL""",
+                          (org["id"],))["n"]
+    audit_count = db.one("SELECT COUNT(*) AS n FROM audit_events WHERE org_id=?",
+                         (org["id"],))["n"]
+    return templates.TemplateResponse(request, "support.html", {
+        "org": org,
+        "user": user,
+        "member": member,
+        "subscription": sub,
+        "members": members,
+        "member_total": len(members),
+        "member_counts": member_counts,
+        "invite_counts": invite_counts,
+        "pack_total": sum(pack_counts.values()),
+        "pack_counts": pack_counts,
+        "recent_invites": recent_invites,
+        "latest_pack": latest_pack,
+        "shared_count": shared_count,
+        "audit_count": audit_count,
+        "audit_events": audit.recent_for_org(org["id"], limit=8),
+        "jobs_pending": jobs.pending_count(),
+        "mise_bridge_armed": bool(config.MISE_IMPORT_TOKEN),
+        "access_token_tail": org["access_token"][-6:],
+    })
+
+
+@app.get("/w/{slug}/settings/audit/events/{event_id}", response_class=HTMLResponse)
+async def audit_event_page(request: Request, slug: str, event_id: int):
+    org, _, _ = _require_owner(request, slug)
+    event = audit.get_for_org(org["id"], event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="audit event not found")
+    return templates.TemplateResponse(request, "audit_event.html", {
+        "org": org,
+        "event": event,
+        "details_json": json.dumps(event["details"], indent=2, sort_keys=True),
     })
 
 

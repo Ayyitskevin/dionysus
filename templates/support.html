@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Support · {{ org.company or org.name }}{% endblock %}
+{% block content %}
+<section class="workspace-head">
+  <div>
+    <p class="eyebrow">{{ org.audience }} · {{ subscription.plan_meta.name }} · {{ subscription.status }}</p>
+    <h1>Support dashboard</h1>
+    <p>{{ org.company or org.name }} · {{ org.email }}</p>
+  </div>
+  <div class="head-actions">
+    <a class="button" href="/w/{{ org.slug }}">Workspace</a>
+    <a class="button secondary" href="/w/{{ org.slug }}/settings">Settings</a>
+    <a class="button ghost" href="/w/{{ org.slug }}/billing">Billing</a>
+  </div>
+</section>
+
+<section class="page settings-page">
+  <div class="support-stats">
+    <article class="support-stat">
+      <span>Members</span>
+      <strong>{{ member_total }}</strong>
+      <p>{{ member_counts.owner }} owner · {{ member_counts.admin }} admin · {{ member_counts.member }} member</p>
+    </article>
+    <article class="support-stat">
+      <span>Invites</span>
+      <strong>{{ invite_counts.pending }}</strong>
+      <p>{{ invite_counts.accepted }} accepted · {{ invite_counts.revoked }} revoked</p>
+    </article>
+    <article class="support-stat">
+      <span>Packs</span>
+      <strong>{{ pack_total }}</strong>
+      <p>{{ pack_counts.approved }} approved · {{ pack_counts.exported }} exported · {{ shared_count }} shared</p>
+    </article>
+    <article class="support-stat">
+      <span>Activity</span>
+      <strong>{{ audit_count }}</strong>
+      <p>{{ jobs_pending }} queued or running jobs</p>
+    </article>
+  </div>
+
+  <div class="support-grid">
+    <section class="panel">
+      <div class="section-row">
+        <h2>Workspace state</h2>
+        <a class="small-link" href="/w/{{ org.slug }}/settings">Edit settings</a>
+      </div>
+      <dl class="settings-list">
+        <div><dt>Workspace slug</dt><dd>{{ org.slug }}</dd></div>
+        <div><dt>Plan</dt><dd>{{ subscription.plan_meta.name }} · {{ subscription.status }}</dd></div>
+        <div><dt>Mise bridge</dt><dd>{% if mise_bridge_armed %}Armed{% else %}Disarmed{% endif %}</dd></div>
+        <div><dt>Workspace token</dt><dd>ends in {{ access_token_tail }}</dd></div>
+        <div><dt>Created</dt><dd>{{ org.created_at }}</dd></div>
+      </dl>
+    </section>
+
+    <section class="panel">
+      <div class="section-row">
+        <h2>Latest pack</h2>
+        <a class="small-link" href="/w/{{ org.slug }}#packs">Open packs</a>
+      </div>
+      {% if latest_pack %}
+      <dl class="settings-list">
+        <div><dt>Title</dt><dd>{{ latest_pack.title }}</dd></div>
+        <div><dt>Status</dt><dd>{{ latest_pack.status }}</dd></div>
+        <div><dt>Share link</dt><dd>{% if latest_pack.share_token %}Ready{% else %}Not created{% endif %}</dd></div>
+        <div><dt>Created</dt><dd>{{ latest_pack.created_at }}</dd></div>
+      </dl>
+      {% else %}
+      <div class="empty-state">
+        <h3>No packs yet</h3>
+        <p>Generated packs will appear here.</p>
+      </div>
+      {% endif %}
+    </section>
+  </div>
+
+  <section class="band settings-band">
+    <div class="section-row">
+      <h2>Access roster</h2>
+      <a class="button secondary" href="/w/{{ org.slug }}/settings#members">Manage members</a>
+    </div>
+    <div class="list">
+      {% for m in members %}
+      <article class="row">
+        <div>
+          <strong>{{ m.name }}</strong>
+          <p>{{ m.email }} · joined {{ m.created_at }}{% if m.last_login_at %} · last login {{ m.last_login_at }}{% endif %}</p>
+        </div>
+        <span class="status-pill {{ m.role }}">{{ m.role }} · active</span>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="band settings-band">
+    <div class="section-row">
+      <h2>Invite states</h2>
+      <a class="small-link" href="/w/{{ org.slug }}/settings#members">Create invite</a>
+    </div>
+    <div class="list">
+      {% for invite in recent_invites %}
+      <article class="row">
+        <div>
+          <strong>{{ invite.email }}</strong>
+          <p>{{ invite.role }} · invited {{ invite.created_at }}{% if invite.accepted_at %} · accepted {{ invite.accepted_at }}{% endif %}{% if invite.revoked_at %} · revoked {{ invite.revoked_at }}{% endif %}</p>
+        </div>
+        <span class="status-pill {{ invite.status }}">{{ invite.status }}</span>
+      </article>
+      {% else %}
+      <div class="empty-state">
+        <h3>No invites yet</h3>
+        <p>Invite history will appear here.</p>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="band settings-band">
+    <div class="section-row">
+      <h2>Recent activity</h2>
+      <a class="small-link" href="/w/{{ org.slug }}/settings#activity">Filter activity</a>
+    </div>
+    <div class="audit-list">
+      {% for event in audit_events %}
+      <article class="audit-row">
+        <div>
+          <strong><a href="/w/{{ org.slug }}/settings/audit/events/{{ event.id }}">{{ event.summary }}</a></strong>
+          <p>{{ event.actor_label }} · {{ event.created_at }}</p>
+        </div>
+        <span>{{ event.action }}</span>
+      </article>
+      {% else %}
+      <div class="empty-state">
+        <h3>No activity yet</h3>
+        <p>Audit events will appear after owner, pack, billing, or member actions.</p>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+</section>
+{% endblock %}

@@ -515,3 +515,62 @@ button:disabled {
 @media (max-width: 880px) {
   .upgrade-strip, .campaign-actions, .campaign-actions form, .settings-grid, .settings-actions, .audit-row, .member-invite, .audit-filters, .section-row { display: grid; min-width: 0; grid-template-columns: 1fr; }
 }
+
+
+.support-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+.support-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+.support-stat {
+  display: grid;
+  gap: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+  background: white;
+}
+.support-stat span {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.support-stat strong {
+  color: var(--leaf);
+  font-size: 2rem;
+  line-height: 1;
+}
+.support-stat p { margin: 0; color: var(--muted); }
+.status-pill {
+  display: inline-flex;
+  width: fit-content;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.35rem 0.6rem;
+  color: var(--blue);
+  background: var(--paper);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+.status-pill.owner, .status-pill.accepted { color: var(--leaf); }
+.status-pill.admin, .status-pill.pending { color: var(--blue); }
+.status-pill.revoked { color: var(--tomato); }
+.json-block {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+  background: #17201b;
+  color: white;
+  font: 0.9rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@media (max-width: 880px) {
+  .support-grid, .support-stats { grid-template-columns: 1fr; }
+}

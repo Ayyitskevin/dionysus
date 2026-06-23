@@ -474,6 +474,71 @@ def test_audit_export_json_and_csv_respect_filters(tmp_path, monkeypatch):
     assert "workspace.settings_updated" not in csv_export.text
 
 
+def test_support_dashboard_surfaces_operator_state(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    res = signup(client)
+    client.post("/w/blue-plate/settings/members/invite", data={
+        "email": "jordan@example.com",
+        "role": "admin",
+    }, cookies=res.cookies, follow_redirects=False)
+    pack = db.one("SELECT * FROM content_packs")
+    client.post(f"/w/blue-plate/packs/{pack['id']}/approve",
+                cookies=res.cookies, follow_redirects=False)
+    client.post(f"/w/blue-plate/packs/{pack['id']}/share",
+                cookies=res.cookies, follow_redirects=False)
+
+    page = client.get("/w/blue-plate/support", cookies=res.cookies)
+    assert page.status_code == 200
+    assert "Support dashboard" in page.text
+    assert "Workspace state" in page.text
+    assert "Access roster" in page.text
+    assert "Invite states" in page.text
+    assert "Recent activity" in page.text
+    assert "jordan@example.com" in page.text
+    assert "pending" in page.text
+    assert "owner · active" in page.text
+    assert "pack.approved" in page.text
+    assert "/w/blue-plate/settings/audit/events/" in page.text
+
+    anon = TestClient(app)
+    redirect = anon.get("/w/blue-plate/support", follow_redirects=False)
+    assert redirect.status_code == 303
+    assert redirect.headers["location"] == "/login?next=%2Fw%2Fblue-plate%2Fsupport"
+
+
+def test_audit_detail_renders_event_details_for_owner_only(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    owner = TestClient(app)
+    res = signup(owner)
+    owner.post("/w/blue-plate/settings/token",
+               cookies=res.cookies, follow_redirects=False)
+    event = db.one("SELECT * FROM audit_events WHERE action='workspace.token_rotated'")
+
+    page = owner.get(f"/w/blue-plate/settings/audit/events/{event['id']}", cookies=res.cookies)
+    assert page.status_code == 200
+    assert f"Audit event #{event['id']}" in page.text
+    assert "workspace.token_rotated" in page.text
+    assert "Rotated workspace token" in page.text
+    assert "token_tail" in page.text
+    assert "Avery (avery@example.com)" in page.text
+
+    owner.post("/w/blue-plate/settings/members/invite", data={
+        "email": "casey@example.com",
+        "role": "member",
+    }, cookies=res.cookies, follow_redirects=False)
+    invite = db.one("SELECT * FROM workspace_invites WHERE email='casey@example.com'")
+    member_client = TestClient(app)
+    accepted = member_client.post(f"/invite/{invite['token']}/accept", data={
+        "name": "Casey",
+        "password": "correct-horse",
+    }, follow_redirects=False)
+    forbidden = member_client.get(
+        f"/w/blue-plate/settings/audit/events/{event['id']}",
+        cookies=accepted.cookies)
+    assert forbidden.status_code == 403
+
+
 def test_billing_page_shows_trial_when_stripe_unconfigured(tmp_path, monkeypatch):
     configure_tmp_db(tmp_path, monkeypatch)
     client = TestClient(app)

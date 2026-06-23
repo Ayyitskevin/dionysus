@@ -9,7 +9,8 @@
   </div>
   <div class="head-actions">
     <a class="button" href="/w/{{ org.slug }}">Workspace</a>
-    <a class="button secondary" href="/w/{{ org.slug }}/billing">Billing</a>
+    <a class="button secondary" href="/w/{{ org.slug }}/support">Support</a>
+    <a class="button ghost" href="/w/{{ org.slug }}/billing">Billing</a>
   </div>
 </section>
 
@@ -63,8 +64,11 @@
     </section>
   </div>
 
-  <section class="band settings-band">
-    <h2>Members</h2>
+  <section class="band settings-band" id="members">
+    <div class="section-row">
+      <h2>Members</h2>
+      <a class="small-link" href="/w/{{ org.slug }}/support">Support dashboard</a>
+    </div>
     <form method="post" action="/w/{{ org.slug }}/settings/members/invite" class="member-invite">
       <label>Name <input name="invitee_name" placeholder="Optional"></label>
       <label>Email <input name="email" type="email" required></label>
@@ -81,7 +85,8 @@
       <article class="row">
         <div>
           <strong>{{ m.name }}</strong>
-          <p>{{ m.email }} · {{ m.role }} · joined {{ m.created_at }}</p>
+          <p>{{ m.email }} · joined {{ m.created_at }}</p>
+          <span class="status-pill {{ m.role }}">{{ m.role }} · active</span>
         </div>
         <div class="settings-actions">
           {% if m.user_id == user.id %}
@@ -112,6 +117,7 @@
         <div>
           <strong>{{ invite.email }}</strong>
           <p>{{ invite.role }} · invited {{ invite.created_at }}</p>
+          <span class="status-pill pending">pending</span>
           <input readonly value="{{ invite.invite_url }}">
         </div>
         <div class="settings-actions">
@@ -192,7 +198,7 @@
       {% for event in audit_events %}
       <article class="audit-row">
         <div>
-          <strong>{{ event.summary }}</strong>
+          <strong><a href="/w/{{ org.slug }}/settings/audit/events/{{ event.id }}">{{ event.summary }}</a></strong>
           <p>{{ event.actor_label }} · {{ event.created_at }}</p>
         </div>
         <span>{{ event.action }}</span>
