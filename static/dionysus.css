@@ -29,7 +29,7 @@ button, .button {
   cursor: pointer;
   text-align: center;
 }
-.button.secondary { background: var(--blue); }
+.button.secondary, button.secondary { background: var(--blue); }
 .ghost {
   background: transparent;
   color: var(--ink);
@@ -267,3 +267,43 @@ label { display: grid; gap: 0.4rem; font-size: 0.9rem; font-weight: 700; }
   flex-wrap: wrap;
 }
 .head-actions form { margin: 0; }
+
+
+.first-value {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 1rem;
+  align-items: stretch;
+  padding: clamp(1rem, 4vw, 2rem);
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+}
+.first-value h2 { margin: 0; font-size: clamp(1.5rem, 3vw, 2.4rem); }
+.first-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  margin-top: 1rem;
+}
+.first-actions form { margin: 0; }
+.first-proof {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 0.6rem;
+  align-content: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+  background: var(--paper);
+}
+.first-proof strong {
+  color: var(--tomato);
+  font-size: 1.6rem;
+  line-height: 1;
+}
+.first-proof span { color: var(--muted); align-self: center; }
+
+@media (max-width: 880px) {
+  .first-value { grid-template-columns: 1fr; }
+}

@@ -2,18 +2,23 @@
 
 import sys
 
-from . import db
+from . import db, seed
 from .readiness import summary
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv or sys.argv[1:]
-    if not argv or argv[0] not in {"check-production", "migrate"}:
-        print("usage: python -m app.cli [check-production|migrate]")
+    commands = {"check-production", "migrate", "seed-demo"}
+    if not argv or argv[0] not in commands:
+        print("usage: python -m app.cli [check-production|migrate|seed-demo]")
         return 2
     if argv[0] == "migrate":
         db.migrate()
         print("migrations applied")
+        return 0
+    if argv[0] == "seed-demo":
+        result = seed.seed_demo_workspace()
+        print("seeded {slug} pack={pack_id} share={share_url}".format(**result))
         return 0
     report = summary()
     for item in report["checks"]:

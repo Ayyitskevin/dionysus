@@ -300,3 +300,25 @@ def test_mise_packs_api_can_include_drafts(tmp_path, monkeypatch):
     )
     assert res.status_code == 200
     assert len(res.json()["packs"]) == 1
+
+
+
+def test_cli_seed_demo_creates_approved_pack_for_mise_bridge(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    from app import cli, config
+    config.BASE_URL = "https://platekit.example.com"
+    assert cli.main(["seed-demo"]) == 0
+    org = db.one("SELECT * FROM organizations WHERE slug='blue-plate'")
+    assert org and org["company"] == "Blue Plate"
+    pack = db.one("SELECT * FROM content_packs WHERE org_id=?", (org["id"],))
+    assert pack["status"] == "approved"
+    assert pack["share_token"]
+    client = TestClient(app)
+    res = client.get(
+        "/api/mise/organizations/blue-plate/packs",
+        headers={"Authorization": "Bearer mise-test"},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert len(body["packs"]) == 1
+    assert body["packs"][0]["share_url"].startswith("https://platekit.example.com/share/")

@@ -19,8 +19,8 @@
   <div>
     <p class="eyebrow">Next best action</p>
     {% if latest_pack %}
-      <h2>Review the pack, then generate one sharper version.</h2>
-      <p>Use the inputs below to add a missing dish, launch detail, client objection, or usage angle. The next generated pack will inherit the sharper context.</p>
+      <h2>Approve, share, and export this first pack.</h2>
+      <p>This is the production loop: a restaurant-ready strategy pack that can be shared, exported, and surfaced inside Mise for client follow-through.</p>
     {% else %}
       <h2>Add one input and generate your first pack.</h2>
       <p>Platekit works best with one clear dish, offer, or client target plus a business goal.</p>
@@ -31,6 +31,30 @@
     <span>{{ pack_used }}{% if pack_limit is not none %}/{{ pack_limit }}{% else %}/unlimited{% endif %} packs used this month</span>
   </div>
 </section>
+
+{% if latest_pack %}
+  {% set latest_body = pack_json[latest_pack.id] %}
+  <section class="first-value">
+    <div>
+      <p class="eyebrow">{{ latest_pack.recipe_name }} · {{ latest_pack.status }}</p>
+      <h2>{{ latest_pack.title }}</h2>
+      <p>{{ latest_body.strategy }}</p>
+      <div class="first-actions">
+        {% if latest_pack.status == "draft" %}
+        <form method="post" action="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/approve"><button>Approve pack</button></form>
+        {% endif %}
+        <form method="post" action="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/share"><button class="secondary">Open share page</button></form>
+        <a class="button ghost" href="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/export.md">Export Markdown</a>
+        <a class="button ghost" href="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/export.txt">Copy text</a>
+      </div>
+    </div>
+    <div class="first-proof">
+      <strong>{{ latest_body.shot_list|length }}</strong><span>shot priorities</span>
+      <strong>{{ latest_body.captions|length }}</strong><span>caption starters</span>
+      <strong>{{ latest_body.exports|length }}</strong><span>channel exports</span>
+    </div>
+  </section>
+{% endif %}
 
 <section class="columns">
   <form method="post" action="/w/{{ org.slug }}/profile" class="panel">
@@ -105,7 +129,9 @@
         </div>
         <div class="pack-actions">
           <span>{{ pack.status }}</span>
+          {% if pack.status == "draft" %}
           <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/approve"><button class="ghost">Approve</button></form>
+          {% endif %}
           <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/share"><button>Share</button></form>
           <a class="button secondary" href="/w/{{ org.slug }}/packs/{{ pack.id }}/export.md">Markdown</a>
           <a class="button secondary" href="/w/{{ org.slug }}/packs/{{ pack.id }}/export.txt">Text</a>
