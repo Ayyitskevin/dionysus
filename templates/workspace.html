@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}{{ org.name }} · Dionysus{% endblock %}
+{% block content %}
+<section class="workspace-head">
+  <div>
+    <p class="eyebrow">{{ org.audience }} · {{ org.plan }}</p>
+    <h1>{{ org.company or org.name }}</h1>
+    <p>{{ org.brand_voice or "Add a brand voice, menu items, and a campaign. Then generate a pack." }}</p>
+  </div>
+  <a class="button" href="#packs">Packs</a>
+</section>
+
+<section class="columns">
+  <form method="post" action="/w/{{ org.slug }}/profile" class="panel">
+    <h2>Profile</h2>
+    <label>Market <input name="market" value="{{ org.market or '' }}" placeholder="Asheville, Charlotte, Raleigh"></label>
+    <label>Service mix <input name="service_mix" value="{{ org.service_mix or '' }}" placeholder="dine-in, delivery, catering"></label>
+    <label>Brand voice <textarea name="brand_voice">{{ org.brand_voice or '' }}</textarea></label>
+    <button>Save profile</button>
+  </form>
+
+  <form method="post" action="/w/{{ org.slug }}/menu" class="panel">
+    <h2>Menu / offer inputs</h2>
+    <label>Name <input name="name" required placeholder="Spring agnolotti"></label>
+    <label>Category <input name="category" placeholder="dish, drink, room, package"></label>
+    <label>Notes <textarea name="notes" placeholder="ingredients, margin, audience, visual cues"></textarea></label>
+    <button>Add item</button>
+  </form>
+
+  <form method="post" action="/w/{{ org.slug }}/campaigns" class="panel">
+    <h2>Campaign</h2>
+    <label>Title <input name="title" required placeholder="June menu launch"></label>
+    <label>Goal <textarea name="goal" placeholder="sell weekend reservations, promote delivery, pitch monthly client"></textarea></label>
+    <label>Launch date <input type="date" name="launch_date"></label>
+    <button>Create campaign</button>
+  </form>
+</section>
+
+<section class="band">
+  <h2>Campaigns</h2>
+  <div class="list">
+    {% for campaign in campaigns %}
+    <article class="row">
+      <div>
+        <strong>{{ campaign.title }}</strong>
+        <p>{{ campaign.goal or "No goal set" }} · {{ campaign.status }}</p>
+      </div>
+      <form method="post" action="/w/{{ org.slug }}/campaigns/{{ campaign.id }}/generate">
+        <select name="recipe_id">
+          {% for recipe in recipes %}
+            {% if recipe.audience in ("both", org.audience) %}
+            <option value="{{ recipe.id }}">{{ recipe.name }}</option>
+            {% endif %}
+          {% endfor %}
+        </select>
+        <button>Generate pack</button>
+      </form>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="band">
+  <h2>Inputs</h2>
+  <div class="chips">
+    {% for item in menu %}
+      <span>{{ item.name }}{% if item.category %} · {{ item.category }}{% endif %}</span>
+    {% else %}
+      <span>No menu items yet</span>
+    {% endfor %}
+  </div>
+</section>
+
+<section id="packs" class="band">
+  <h2>Generated packs</h2>
+  {% for pack in packs %}
+    {% set body = pack_json[pack.id] %}
+    <article class="pack">
+      <header>
+        <div>
+          <p class="eyebrow">{{ pack.recipe_name }} · {{ pack.ai_model }}</p>
+          <h3>{{ pack.title }}</h3>
+        </div>
+        <span>{{ pack.status }}</span>
+      </header>
+      <p>{{ body.strategy }}</p>
+      <div class="pack-grid">
+        <div><h4>Shot list</h4><ul>{% for x in body.shot_list %}<li>{{ x }}</li>{% endfor %}</ul></div>
+        <div><h4>Captions</h4><ul>{% for x in body.captions %}<li>{{ x }}</li>{% endfor %}</ul></div>
+        <div><h4>Exports</h4><ul>{% for x in body.exports %}<li>{{ x }}</li>{% endfor %}</ul></div>
+        <div><h4>Upsells</h4><ul>{% for x in body.upsells %}<li>{{ x }}</li>{% endfor %}</ul></div>
+      </div>
+    </article>
+  {% else %}
+    <p>No packs yet.</p>
+  {% endfor %}
+</section>
+{% endblock %}

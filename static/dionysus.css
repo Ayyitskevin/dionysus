@@ -1,0 +1,169 @@
+:root {
+  --ink: #17201b;
+  --muted: #65706a;
+  --line: #d9ded8;
+  --paper: #f7f5ee;
+  --panel: #ffffff;
+  --leaf: #245a48;
+  --tomato: #b84635;
+  --gold: #d89c37;
+  --blue: #315f7b;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  color: var(--ink);
+  background: var(--paper);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: 0;
+}
+a { color: inherit; text-decoration: none; }
+button, .button {
+  border: 0;
+  background: var(--leaf);
+  color: white;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  font-weight: 700;
+  cursor: pointer;
+}
+input, select, textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.7rem 0.75rem;
+  font: inherit;
+  background: white;
+}
+textarea { min-height: 96px; resize: vertical; }
+label { display: grid; gap: 0.4rem; font-size: 0.9rem; font-weight: 700; }
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem clamp(1rem, 5vw, 4rem);
+  border-bottom: 1px solid var(--line);
+  background: rgba(247, 245, 238, 0.95);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.brand { font-weight: 900; font-size: 1.1rem; }
+.topbar nav { display: flex; gap: 1rem; color: var(--muted); font-weight: 700; }
+
+.hero {
+  min-height: calc(100vh - 70px);
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+  gap: clamp(2rem, 5vw, 5rem);
+  align-items: center;
+  padding: clamp(2rem, 6vw, 5rem);
+  background:
+    linear-gradient(rgba(23, 32, 27, 0.20), rgba(23, 32, 27, 0.50)),
+    url("https://images.unsplash.com/photo-1551218808-94e220e084d2?auto=format&fit=crop&w=1800&q=80") center/cover;
+  color: white;
+}
+.hero h1 {
+  font-size: clamp(2.4rem, 7vw, 6rem);
+  line-height: 0.95;
+  margin: 0;
+  max-width: 980px;
+}
+.lede { max-width: 680px; font-size: 1.2rem; line-height: 1.55; }
+.eyebrow {
+  color: var(--gold);
+  text-transform: uppercase;
+  font-weight: 900;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+}
+.signup, .panel, .card, .pack {
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.signup {
+  display: grid;
+  gap: 1rem;
+  padding: 1.25rem;
+  align-self: center;
+}
+.band, .page {
+  padding: clamp(2rem, 5vw, 4rem);
+}
+.band h2, .page h1 { margin-top: 0; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+.card { padding: 1rem; }
+.card span, .price strong { color: var(--tomato); font-weight: 900; }
+.two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2rem;
+  border-top: 1px solid var(--line);
+}
+.workspace-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 2rem;
+  align-items: center;
+  padding: clamp(2rem, 5vw, 4rem);
+  background: #e8ece5;
+}
+.workspace-head h1 { margin: 0; font-size: clamp(2rem, 5vw, 4rem); }
+.columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  padding: clamp(1rem, 4vw, 2rem);
+}
+.panel { display: grid; gap: 1rem; padding: 1rem; align-content: start; }
+.list { display: grid; gap: 0.75rem; }
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  background: white;
+  border-radius: 8px;
+}
+.row p { color: var(--muted); margin: 0.25rem 0 0; }
+.row form { display: flex; gap: 0.5rem; align-items: center; min-width: 360px; }
+.chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.chips span {
+  background: white;
+  border: 1px solid var(--line);
+  padding: 0.5rem 0.75rem;
+  border-radius: 999px;
+}
+.pack { margin-bottom: 1rem; padding: 1rem; }
+.pack header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 1rem;
+}
+.pack h3 { margin: 0 0 0.75rem; }
+.pack-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+.pack-grid h4 { color: var(--blue); margin-bottom: 0.4rem; }
+.pack-grid ul, .price ul { padding-left: 1.1rem; }
+
+@media (max-width: 880px) {
+  .hero, .two, .columns, .pack-grid { grid-template-columns: 1fr; }
+  .hero { min-height: auto; }
+  .row, .row form, .workspace-head { display: grid; min-width: 0; }
+}

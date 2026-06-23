@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Pricing · Dionysus{% endblock %}
+{% block content %}
+<section class="page">
+  <h1>Pricing</h1>
+  <div class="grid">
+    {% for plan in plans %}
+    <article class="card price">
+      <h2>{{ plan.name }}</h2>
+      <strong>{{ plan.price|money }}/mo</strong>
+      <p>{{ plan.for }}</p>
+      <ul>
+        {% for feature in plan.features %}<li>{{ feature }}</li>{% endfor %}
+      </ul>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

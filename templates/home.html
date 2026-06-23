@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Dionysus · Food Photo AI SaaS{% endblock %}
+{% block content %}
+<section class="hero">
+  <div>
+    <p class="eyebrow">Platekit by Dionysus</p>
+    <h1>Turn one food shoot into a month of sellable restaurant content.</h1>
+    <p class="lede">A companion SaaS for Mise: owners get menu-launch packs and social copy; photographers get shot lists, client-ready briefs, and retainer upsells.</p>
+  </div>
+  <form class="signup" method="post" action="/signup">
+    <label>Name <input name="name" required></label>
+    <label>Email <input name="email" type="email" required></label>
+    <label>Business or studio <input name="company"></label>
+    <label>I am
+      <select name="audience">
+        <option value="restaurant">Restaurant owner/operator</option>
+        <option value="photographer">Photographer/studio</option>
+      </select>
+    </label>
+    <label>Plan
+      <select name="plan">
+        <option value="starter">Starter</option>
+        <option value="growth">Growth</option>
+        <option value="studio">Studio</option>
+      </select>
+    </label>
+    <button type="submit">Create workspace</button>
+  </form>
+</section>
+
+<section class="band">
+  <h2>Product surface</h2>
+  <div class="grid">
+    {% for recipe in recipes %}
+    <article class="card">
+      <span>{{ recipe.price_anchor_cents|money }}</span>
+      <h3>{{ recipe.name }}</h3>
+      <p>{{ recipe.deliverable_note }}</p>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="band two">
+  <div>
+    <h2>For restaurant owners</h2>
+    <p>Draft the next menu-launch campaign, delivery-app refresh, social captions, and press angle from the dishes already being photographed.</p>
+  </div>
+  <div>
+    <h2>For photographers</h2>
+    <p>Package strategy, shot lists, captions, usage prompts, and retainer upsells as a recurring client deliverable instead of unpaid prep work.</p>
+  </div>
+</section>
+{% endblock %}
