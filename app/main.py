@@ -3,6 +3,7 @@
 import datetime as dt
 import json
 import logging
+from urllib.parse import quote, urlparse
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
@@ -39,6 +40,8 @@ async def common_headers(request: Request, call_next):
 
 @app.exception_handler(StarletteHTTPException)
 async def branded_errors(request: Request, exc: StarletteHTTPException):
+    if exc.status_code == 403 and _should_redirect_to_login(request):
+        return RedirectResponse(_login_url_for_request(request), status_code=303)
     if exc.status_code in (402, 403, 404, 410) and             "text/html" in request.headers.get("accept", ""):
         return templates.TemplateResponse(
             request, "error.html", {"status": exc.status_code, "detail": exc.detail},
@@ -56,34 +59,106 @@ async def readiness_check():
     return readiness.summary()
 
 
-def _signup_defaults(request: Request) -> dict:
-    audience = request.query_params.get("audience", "restaurant").strip().lower()
+def _signup_state(data, *, normalize: bool = True) -> dict:
+    audience = (data.get("audience") or "restaurant").strip().lower()
     if audience not in ("restaurant", "photographer"):
         audience = "restaurant"
-    plan = plans.normalize_plan(request.query_params.get("plan", ""), audience)
+    raw_plan = data.get("plan") or ""
+    plan = plans.normalize_plan(raw_plan, audience) if normalize else raw_plan
     return {
-        "name": request.query_params.get("name", ""),
-        "email": request.query_params.get("email", ""),
-        "company": request.query_params.get("company", ""),
+        "name": data.get("name", ""),
+        "email": data.get("email", ""),
+        "company": data.get("company", ""),
         "audience": audience,
         "plan": plan,
-        "market": request.query_params.get("market", ""),
-        "service_mix": request.query_params.get("service_mix", ""),
-        "brand_voice": request.query_params.get("brand_voice", ""),
-        "first_item": request.query_params.get("first_item", ""),
-        "first_item_note": request.query_params.get("first_item_note", ""),
-        "campaign_goal": request.query_params.get("campaign_goal", ""),
-        "launch_date": request.query_params.get("launch_date", ""),
+        "market": data.get("market", ""),
+        "service_mix": data.get("service_mix", ""),
+        "brand_voice": data.get("brand_voice", ""),
+        "first_item": data.get("first_item", ""),
+        "first_item_note": data.get("first_item_note", ""),
+        "campaign_goal": data.get("campaign_goal", ""),
+        "launch_date": data.get("launch_date", ""),
     }
+
+
+def _signup_defaults(request: Request) -> dict:
+    return _signup_state(request.query_params)
+
+
+def _home_context(request: Request, *, signup: dict | None = None,
+                  signup_error: str | None = None) -> dict:
+    return {
+        "recipes": recipes.active()[:4],
+        "plans": plans.all_plans(),
+        "signup": signup or _signup_defaults(request),
+        "signup_error": signup_error,
+    }
+
+
+def _safe_next(raw_next: str | None) -> str:
+    if not raw_next:
+        return ""
+    parsed = urlparse(raw_next)
+    if parsed.scheme or parsed.netloc:
+        return ""
+    if not raw_next.startswith("/") or raw_next.startswith("//") or "\\" in raw_next:
+        return ""
+    if not (raw_next == "/" or raw_next.startswith("/w/")):
+        return ""
+    return raw_next
+
+
+def _workspace_page_path(path: str) -> bool:
+    parts = [part for part in path.split("/") if part]
+    return len(parts) == 2 and parts[0] == "w" or (
+        len(parts) == 3 and parts[0] == "w" and parts[2] == "billing")
+
+
+def _should_redirect_to_login(request: Request) -> bool:
+    return (
+        request.method == "GET"
+        and _workspace_page_path(request.url.path)
+        and not security.user_id_from_request(request)
+    )
+
+
+def _login_url_for_request(request: Request) -> str:
+    target = request.url.path
+    if request.url.query:
+        target = f"{target}?{request.url.query}"
+    return f"/login?next={quote(target, safe='')}"
+
+
+def _workspace_slug_from_next(target: str) -> str:
+    parts = [part for part in urlparse(target).path.split("/") if part]
+    if len(parts) >= 2 and parts[0] == "w":
+        return parts[1]
+    return ""
+
+
+def _login_destination(user_id: int, raw_next: str) -> tuple[str, str | None]:
+    safe_next = _safe_next(raw_next)
+    if safe_next:
+        requested_slug = _workspace_slug_from_next(safe_next)
+        if requested_slug:
+            member = db.one("""SELECT o.slug FROM organization_members om
+                               JOIN organizations o ON o.id=om.org_id
+                               WHERE om.user_id=? AND o.slug=?""",
+                            (user_id, requested_slug))
+            if member:
+                return safe_next, member["slug"]
+    member = db.one("""SELECT o.slug FROM organization_members om
+                       JOIN organizations o ON o.id=om.org_id
+                       WHERE om.user_id=? ORDER BY om.created_at LIMIT 1""",
+                    (user_id,))
+    if member:
+        return f"/w/{member['slug']}", member["slug"]
+    return "/", None
 
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    return templates.TemplateResponse(request, "home.html", {
-        "recipes": recipes.active()[:4],
-        "plans": plans.all_plans(),
-        "signup": _signup_defaults(request),
-    })
+    return templates.TemplateResponse(request, "home.html", _home_context(request))
 
 
 @app.get("/pricing", response_class=HTMLResponse)
@@ -93,27 +168,34 @@ async def pricing(request: Request):
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_form(request: Request):
-    return templates.TemplateResponse(request, "login.html", {"error": None})
+    return templates.TemplateResponse(request, "login.html", {
+        "error": None,
+        "email": request.query_params.get("email", ""),
+        "next": _safe_next(request.query_params.get("next", "")),
+    })
 
 
 @app.post("/login")
-async def login(request: Request, email: str = Form(...), password: str = Form(...)):
-    user = db.one("SELECT * FROM users WHERE email=?", (email.strip().lower(),))
+async def login(request: Request, email: str = Form(...), password: str = Form(...),
+                next: str = Form("")):
+    email = email.strip().lower()
+    user = db.one("SELECT * FROM users WHERE email=?", (email,))
+    safe_next = _safe_next(next)
     if not user or not security.verify_password(password, user["password_hash"]):
         return templates.TemplateResponse(
-            request, "login.html", {"error": "Invalid email or password."},
+            request, "login.html", {
+                "error": "Invalid email or password.",
+                "email": email,
+                "next": safe_next,
+            },
             status_code=401)
     db.run("UPDATE users SET last_login_at=datetime('now') WHERE id=?", (user["id"],))
-    member = db.one("""SELECT o.slug FROM organization_members om
-                       JOIN organizations o ON o.id=om.org_id
-                       WHERE om.user_id=? ORDER BY om.created_at LIMIT 1""",
-                    (user["id"],))
-    target = f"/w/{member['slug']}" if member else "/"
+    target, workspace_slug = _login_destination(user["id"], safe_next)
     resp = RedirectResponse(target, status_code=303)
     resp.set_cookie(security.USER_COOKIE, security.user_cookie(user["id"]),
                     **_auth_cookie_kwargs())
-    if member:
-        resp.set_cookie(security.WORKSPACE_COOKIE, security.workspace_cookie(member["slug"]),
+    if workspace_slug:
+        resp.set_cookie(security.WORKSPACE_COOKIE, security.workspace_cookie(workspace_slug),
                         **_auth_cookie_kwargs())
     return resp
 
@@ -182,7 +264,7 @@ def _first_recipe_slug(audience: str, plan: str) -> str:
 
 
 @app.post("/signup")
-async def signup(name: str = Form(...), email: str = Form(...),
+async def signup(request: Request, name: str = Form(...), email: str = Form(...),
                  password: str = Form(...), audience: str = Form(...),
                  company: str = Form(""), plan: str = Form("restaurant_starter"),
                  market: str = Form(""), brand_voice: str = Form(""),
@@ -195,7 +277,28 @@ async def signup(name: str = Form(...), email: str = Form(...),
         raise HTTPException(status_code=400, detail="password must be at least 8 characters")
     email = email.strip().lower()
     if db.one("SELECT id FROM users WHERE email=?", (email,)):
-        raise HTTPException(status_code=400, detail="account already exists; log in")
+        signup_state = _signup_state({
+            "name": name.strip(),
+            "email": email,
+            "company": company.strip(),
+            "audience": audience,
+            "plan": plan,
+            "market": market,
+            "service_mix": service_mix,
+            "brand_voice": brand_voice,
+            "first_item": first_item,
+            "first_item_note": first_item_note,
+            "campaign_goal": campaign_goal,
+            "launch_date": launch_date,
+        })
+        return templates.TemplateResponse(
+            request, "home.html",
+            _home_context(
+                request,
+                signup=signup_state,
+                signup_error="An account already exists for this email. Log in instead.",
+            ),
+            status_code=400)
     plan = plans.normalize_plan(plan, audience)
     base = security.slugify(company or name)
     slug = base

@@ -9,6 +9,9 @@
   </div>
   <form id="signup" class="signup onboarding" method="post" action="/signup">
     <h2>Build the first pack</h2>
+    {% if signup_error %}
+    <p class="error">{{ signup_error }} <a href="/login?email={{ signup.email }}">Log in instead</a>.</p>
+    {% endif %}
     <div class="form-grid">
       <label>Name <input name="name" value="{{ signup.name }}" required></label>
       <label>Email <input name="email" type="email" value="{{ signup.email }}" required></label>

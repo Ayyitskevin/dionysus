@@ -130,6 +130,54 @@ def test_login_restores_workspace_access(tmp_path, monkeypatch):
     assert client.get("/w/blue-plate", cookies=login.cookies).status_code == 200
 
 
+def test_workspace_redirects_anonymous_to_login_next(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    signup(client)
+    anon = TestClient(app)
+    res = anon.get("/w/blue-plate", follow_redirects=False)
+    assert res.status_code == 303
+    assert res.headers["location"] == "/login?next=%2Fw%2Fblue-plate"
+
+
+def test_login_honors_safe_workspace_next(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    signup(client)
+    login = client.post("/login", data={
+        "email": "avery@example.com",
+        "password": "correct-horse",
+        "next": "/w/blue-plate/billing",
+    }, follow_redirects=False)
+    assert login.status_code == 303
+    assert login.headers["location"] == "/w/blue-plate/billing"
+    assert client.get("/w/blue-plate/billing", cookies=login.cookies).status_code == 200
+
+
+def test_login_rejects_external_next(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    signup(client)
+    login = client.post("/login", data={
+        "email": "avery@example.com",
+        "password": "correct-horse",
+        "next": "https://evil.example/w/blue-plate",
+    }, follow_redirects=False)
+    assert login.status_code == 303
+    assert login.headers["location"] == "/w/blue-plate"
+
+
+def test_duplicate_signup_renders_friendly_login_prompt(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    signup(client)
+    duplicate = signup(client)
+    assert duplicate.status_code == 400
+    assert "An account already exists for this email" in duplicate.text
+    assert "Log in instead" in duplicate.text
+    assert 'name="email" type="email" value="avery@example.com"' in duplicate.text
+
+
 def test_plan_gate_blocks_locked_recipe_for_starter(tmp_path, monkeypatch):
     configure_tmp_db(tmp_path, monkeypatch)
     client = TestClient(app)
