@@ -108,3 +108,60 @@ def test_mise_api_is_dormant_or_bearer_gated(tmp_path, monkeypatch):
         "/api/mise/organizations/nope/latest-pack",
         headers={"Authorization": "Bearer mise-test"},
     ).status_code == 404
+
+
+
+def test_configured_stripe_checkout_redirects_to_session_url(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    from app import billing, config
+    config.STRIPE_SECRET_KEY = "sk_test"
+    config.STRIPE_PRICE_RESTAURANT_GROWTH = "price_growth"
+
+    class FakeSession:
+        @staticmethod
+        def create(**kwargs):
+            assert kwargs["mode"] == "subscription"
+            assert kwargs["line_items"] == [{"price": "price_growth", "quantity": 1}]
+            assert kwargs["metadata"]["plan"] == "restaurant_growth"
+            return {"url": "https://checkout.stripe.test/session"}
+
+    class FakeStripe:
+        api_key = None
+        checkout = type("checkout", (), {"Session": FakeSession})
+
+    monkeypatch.setattr(billing, "_stripe", lambda: FakeStripe)
+    client = TestClient(app)
+    res = signup(client)
+    checkout = client.post("/w/blue-plate/billing/checkout",
+                           cookies=res.cookies, follow_redirects=False)
+    assert checkout.status_code == 303
+    assert checkout.headers["location"] == "https://checkout.stripe.test/session"
+
+
+def test_stripe_webhook_marks_subscription_active(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    from app import billing, config
+    config.STRIPE_WEBHOOK_SECRET = "whsec_test"
+    client = TestClient(app)
+    signup(client)
+    org = db.one("SELECT id FROM organizations WHERE slug='blue-plate'")
+
+    async def fake_construct(request):
+        return {
+            "type": "checkout.session.completed",
+            "data": {"object": {
+                "client_reference_id": str(org["id"]),
+                "customer": "cus_123",
+                "subscription": "sub_123",
+                "metadata": {"org_id": str(org["id"]), "plan": "restaurant_growth"},
+            }},
+        }
+
+    monkeypatch.setattr(billing, "construct_webhook_event", fake_construct)
+    res = client.post("/stripe/webhook", content=b"{}",
+                      headers={"stripe-signature": "sig"})
+    assert res.status_code == 200
+    sub = db.one("SELECT * FROM subscriptions WHERE org_id=?", (org["id"],))
+    assert sub["status"] == "active"
+    assert sub["stripe_customer_id"] == "cus_123"
+    assert sub["stripe_subscription_id"] == "sub_123"

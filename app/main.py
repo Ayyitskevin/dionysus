@@ -268,10 +268,18 @@ async def billing_page(request: Request, slug: str):
 @app.post("/w/{slug}/billing/checkout")
 async def start_checkout(request: Request, slug: str):
     org, _ = _require_workspace(request, slug)
-    state = billing.checkout_state(org)
-    if not state["configured"]:
-        raise HTTPException(status_code=503, detail="Stripe checkout is not configured")
-    raise HTTPException(status_code=501, detail="Stripe checkout session creation is next")
+    url = billing.create_checkout_session(
+        org,
+        success_url=f"{config.BASE_URL}/w/{slug}/billing?checkout=success",
+        cancel_url=f"{config.BASE_URL}/w/{slug}/billing?checkout=cancel",
+    )
+    return RedirectResponse(url, status_code=303)
+
+
+@app.post("/stripe/webhook")
+async def stripe_webhook(request: Request):
+    event = await billing.construct_webhook_event(request)
+    return billing.handle_event(event)
 
 
 @app.get("/api/mise/organizations/{slug}/latest-pack",

@@ -68,9 +68,10 @@ The current MVP includes the first paid-product boundary:
 - Plan-gated content recipes and monthly pack limits
 - Billing page that stays in trial mode until Stripe keys and price IDs are configured
 
-Stripe checkout is intentionally scaffolded, not faked. Configure the keys in
-`ops/env.example`, then wire `POST /w/{slug}/billing/checkout` to create a real
-Checkout Session.
+Stripe checkout now creates real subscription Checkout Sessions when
+`DIONYSUS_STRIPE_SECRET_KEY` and the active plan's Stripe price ID are configured.
+`POST /stripe/webhook` verifies Stripe signatures with
+`DIONYSUS_STRIPE_WEBHOOK_SECRET` and syncs subscription status from Stripe events.
 
 Production starting points:
 
