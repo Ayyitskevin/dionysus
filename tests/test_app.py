@@ -256,3 +256,47 @@ def test_workspace_export_requires_membership(tmp_path, monkeypatch):
     res = anon.get(f"/w/blue-plate/packs/{pack['id']}/export.md",
                    follow_redirects=False)
     assert res.status_code == 403
+
+
+
+def test_mise_packs_api_returns_only_approved_or_exported_by_default(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    res = signup(client)
+    pack = db.one("SELECT * FROM content_packs")
+
+    hidden = client.get(
+        "/api/mise/organizations/blue-plate/packs",
+        headers={"Authorization": "Bearer mise-test"},
+    )
+    assert hidden.status_code == 200
+    assert hidden.json()["packs"] == []
+
+    client.post(f"/w/blue-plate/packs/{pack['id']}/approve",
+                cookies=res.cookies, follow_redirects=False)
+    shown = client.get(
+        "/api/mise/organizations/blue-plate/packs",
+        headers={"Authorization": "Bearer mise-test"},
+    )
+    body = shown.json()
+    assert body["matched"] is True
+    assert len(body["packs"]) == 1
+    api_pack = body["packs"][0]
+    assert api_pack["title"] == "First monthly content pack"
+    assert api_pack["status"] == "approved"
+    assert api_pack["campaign"]["title"] == "First monthly content pack"
+    assert api_pack["share_url"].startswith("http")
+    assert "## Shot List" in api_pack["markdown"]
+    assert "Spring agnolotti" in api_pack["markdown"]
+
+
+def test_mise_packs_api_can_include_drafts(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    signup(client)
+    res = client.get(
+        "/api/mise/organizations/blue-plate/packs?include_drafts=true",
+        headers={"Authorization": "Bearer mise-test"},
+    )
+    assert res.status_code == 200
+    assert len(res.json()["packs"]) == 1

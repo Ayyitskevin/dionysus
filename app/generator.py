@@ -17,6 +17,11 @@ def _menu_lines(org_id: int) -> list[str]:
         "seasonal hero dish", "signature drink", "interior ambience"]
 
 
+def _headline(title: str) -> str:
+    clean = title.strip()
+    return clean if clean.lower().endswith(("pack", "kit")) else f"{clean} content pack"
+
+
 def build_pack(org, campaign, recipe) -> dict:
     menu = _menu_lines(org["id"])
     audience = org["audience"]
@@ -65,7 +70,7 @@ def build_pack(org, campaign, recipe) -> dict:
 
     channels = json.loads(recipe["channels"])
     return {
-        "headline": f"{title} content pack",
+        "headline": _headline(title),
         "strategy": f"{recipe['name']} for {org['name']}: {offer}. Voice: {voice}.",
         "shot_list": shot_list,
         "captions": captions,

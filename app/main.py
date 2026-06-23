@@ -404,14 +404,61 @@ async def stripe_webhook(request: Request):
     return billing.handle_event(event)
 
 
+def _pack_api_payload(pack) -> dict:
+    token = pack["share_token"] or pack_utils.ensure_share_token(pack["id"])
+    return {
+        "id": pack["id"],
+        "title": pack["title"],
+        "status": pack["status"],
+        "recipe": {"id": pack["recipe_id"], "slug": pack["recipe_slug"],
+                   "name": pack["recipe_name"]},
+        "campaign": {"id": pack["campaign_id"], "title": pack["campaign_title"]},
+        "created_at": pack["created_at"],
+        "approved_at": pack["approved_at"],
+        "exported_at": pack["exported_at"],
+        "share_url": f"{config.BASE_URL}/share/{token}",
+        "markdown": pack_utils.markdown(pack),
+        "body": pack_utils.body(pack),
+    }
+
+
+@app.get("/api/mise/organizations/{slug}/packs",
+         dependencies=[Depends(security.require_mise_token)])
+async def packs_for_mise(slug: str, include_drafts: bool = False):
+    org = _org_by_slug(slug)
+    where = "cp.org_id=?"
+    params: list = [org["id"]]
+    if not include_drafts:
+        where += " AND cp.status IN ('approved','exported')"
+    rows = db.all_(f"""SELECT cp.*, cr.slug AS recipe_slug, cr.name AS recipe_name,
+                              c.title AS campaign_title,
+                              o.name AS org_name, o.company, o.audience
+                       FROM content_packs cp
+                       JOIN content_recipes cr ON cr.id=cp.recipe_id
+                       JOIN campaigns c ON c.id=cp.campaign_id
+                       JOIN organizations o ON o.id=cp.org_id
+                       WHERE {where}
+                       ORDER BY cp.created_at DESC""", tuple(params))
+    return {
+        "matched": True,
+        "org": slug,
+        "packs": [_pack_api_payload(p) for p in rows],
+    }
+
+
 @app.get("/api/mise/organizations/{slug}/latest-pack",
          dependencies=[Depends(security.require_mise_token)])
 async def latest_pack_for_mise(slug: str):
     org = _org_by_slug(slug)
-    pack = db.one("""SELECT cp.*, cr.slug AS recipe_slug FROM content_packs cp
+    pack = db.one("""SELECT cp.*, cr.slug AS recipe_slug, cr.name AS recipe_name,
+                            c.title AS campaign_title,
+                            o.name AS org_name, o.company, o.audience
+                     FROM content_packs cp
                      JOIN content_recipes cr ON cr.id=cp.recipe_id
+                     JOIN campaigns c ON c.id=cp.campaign_id
+                     JOIN organizations o ON o.id=cp.org_id
                      WHERE cp.org_id=? ORDER BY cp.created_at DESC LIMIT 1""",
                   (org["id"],))
     if not pack:
         return {"matched": True, "org": slug, "pack": None}
-    return {"matched": True, "org": slug, "pack": json.loads(pack["body_json"])}
+    return {"matched": True, "org": slug, "pack": _pack_api_payload(pack)}
