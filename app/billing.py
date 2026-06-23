@@ -169,6 +169,8 @@ async def construct_webhook_event(request: Request) -> dict:
         event = stripe.Webhook.construct_event(payload, sig, config.STRIPE_WEBHOOK_SECRET)
         if hasattr(event, "to_dict_recursive"):
             return event.to_dict_recursive()
+        if hasattr(event, "to_dict"):
+            return event.to_dict()
         return event
     except Exception as exc:
         raise HTTPException(status_code=400, detail="invalid Stripe webhook") from exc

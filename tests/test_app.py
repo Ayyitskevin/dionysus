@@ -229,7 +229,7 @@ def test_stripe_webhook_accepts_stripe_event_objects(tmp_path, monkeypatch):
     org = db.one("SELECT id FROM organizations WHERE slug='blue-plate'")
 
     class FakeEvent:
-        def to_dict_recursive(self):
+        def to_dict(self):
             return {
                 "type": "checkout.session.completed",
                 "data": {"object": {
