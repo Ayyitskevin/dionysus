@@ -110,8 +110,10 @@ def _safe_next(raw_next: str | None) -> str:
 
 def _workspace_page_path(path: str) -> bool:
     parts = [part for part in path.split("/") if part]
-    return len(parts) == 2 and parts[0] == "w" or (
-        len(parts) == 3 and parts[0] == "w" and parts[2] == "billing")
+    if len(parts) == 2 and parts[0] == "w":
+        return True
+    return len(parts) == 3 and parts[0] == "w" and parts[2] in {
+        "billing", "settings"}
 
 
 def _should_redirect_to_login(request: Request) -> bool:
@@ -235,6 +237,17 @@ def _require_workspace(request: Request, slug: str):
     if security.has_workspace_access(request, slug):
         return org, user
     raise HTTPException(status_code=403, detail="workspace access required")
+
+
+def _require_owner(request: Request, slug: str):
+    org = _org_by_slug(slug)
+    user = _current_user(request)
+    if not user:
+        raise HTTPException(status_code=403, detail="login required")
+    member = _membership(user["id"], org["id"])
+    if not member or member["role"] not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="owner access required")
+    return org, user, member
 
 
 def _auth_cookie_kwargs() -> dict:
@@ -391,6 +404,76 @@ async def workspace(request: Request, slug: str):
         },
         "shared_pack_id": shared_pack_id,
     })
+
+
+@app.get("/w/{slug}/settings", response_class=HTMLResponse)
+async def settings_page(request: Request, slug: str):
+    org, user, member = _require_owner(request, slug)
+    sub = billing.checkout_state(org)
+    packs = db.all_("""SELECT id, title, status, share_token, created_at
+                       FROM content_packs
+                       WHERE org_id=? ORDER BY created_at DESC, id DESC""",
+                    (org["id"],))
+    shared_count = db.one("""SELECT COUNT(*) AS n FROM content_packs
+                             WHERE org_id=? AND share_token IS NOT NULL""",
+                          (org["id"],))["n"]
+    bridge_count = db.one("""SELECT COUNT(*) AS n FROM content_packs
+                             WHERE org_id=? AND status IN ('approved','exported')""",
+                          (org["id"],))["n"]
+    notice = request.query_params.get("notice", "")
+    rotated = request.query_params.get("rotated", "") == "1"
+    revoked = request.query_params.get("revoked", "")
+    return templates.TemplateResponse(request, "settings.html", {
+        "org": org,
+        "user": user,
+        "member": member,
+        "subscription": sub,
+        "packs": packs,
+        "shared_count": shared_count,
+        "bridge_count": bridge_count,
+        "mise_bridge_armed": bool(config.MISE_IMPORT_TOKEN),
+        "access_token_tail": org["access_token"][-6:],
+        "notice": notice,
+        "rotated": rotated,
+        "revoked": revoked,
+    })
+
+
+@app.post("/w/{slug}/settings")
+async def update_settings(request: Request, slug: str,
+                          company: str = Form(""), email: str = Form(...),
+                          market: str = Form(""), service_mix: str = Form(""),
+                          brand_voice: str = Form("")):
+    org, _, _ = _require_owner(request, slug)
+    email = email.strip().lower()
+    if "@" not in email or "." not in email.rsplit("@", 1)[-1]:
+        raise HTTPException(status_code=400, detail="valid contact email required")
+    db.run("""UPDATE organizations
+              SET company=?, email=?, market=?, service_mix=?, brand_voice=?
+              WHERE id=?""",
+           (company.strip() or None, email, market.strip() or None,
+            service_mix.strip() or None, brand_voice.strip() or None, org["id"]))
+    return RedirectResponse(f"/w/{slug}/settings?notice=saved", status_code=303)
+
+
+@app.post("/w/{slug}/settings/token")
+async def rotate_access_token(request: Request, slug: str):
+    org, _, _ = _require_owner(request, slug)
+    db.run("""UPDATE organizations SET access_token=? WHERE id=?""",
+           (security.new_token(), org["id"]))
+    return RedirectResponse(f"/w/{slug}/settings?rotated=1", status_code=303)
+
+
+@app.post("/w/{slug}/settings/packs/{pack_id}/revoke-share")
+async def revoke_pack_share(request: Request, slug: str, pack_id: int):
+    org, _, _ = _require_owner(request, slug)
+    pack = pack_utils.get_for_org(pack_id, org["id"])
+    if not pack:
+        raise HTTPException(status_code=404, detail="pack not found")
+    db.run("""UPDATE content_packs
+              SET share_token=NULL, updated_at=datetime('now')
+              WHERE id=?""", (pack_id,))
+    return RedirectResponse(f"/w/{slug}/settings?revoked={pack_id}", status_code=303)
 
 
 @app.post("/w/{slug}/profile")

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Settings · {{ org.company or org.name }}{% endblock %}
+{% block content %}
+<section class="workspace-head">
+  <div>
+    <p class="eyebrow">{{ org.audience }} · {{ subscription.plan_meta.name }} · {{ subscription.status }}</p>
+    <h1>Workspace settings</h1>
+    <p>{{ org.company or org.name }} · {{ org.email }}</p>
+  </div>
+  <div class="head-actions">
+    <a class="button" href="/w/{{ org.slug }}">Workspace</a>
+    <a class="button secondary" href="/w/{{ org.slug }}/billing">Billing</a>
+  </div>
+</section>
+
+<section class="page settings-page">
+  {% if notice == "saved" %}
+  <div class="notice success"><strong>Settings saved.</strong><span>Workspace basics were updated.</span></div>
+  {% endif %}
+  {% if rotated %}
+  <div class="notice success"><strong>Workspace token rotated.</strong><span>Old token-based access should be treated as expired.</span></div>
+  {% endif %}
+  {% if revoked %}
+  <div class="notice warning"><strong>Share link revoked.</strong><span>The previous public URL for pack #{{ revoked }} no longer resolves.</span></div>
+  {% endif %}
+
+  <div class="settings-grid">
+    <form method="post" action="/w/{{ org.slug }}/settings" class="panel">
+      <h2>Workspace basics</h2>
+      <label>Business or studio <input name="company" value="{{ org.company or '' }}"></label>
+      <label>Contact email <input name="email" type="email" value="{{ org.email }}" required></label>
+      <label>Market <input name="market" value="{{ org.market or '' }}"></label>
+      <label>Service mix <input name="service_mix" value="{{ org.service_mix or '' }}"></label>
+      <label>Brand voice <textarea name="brand_voice">{{ org.brand_voice or '' }}</textarea></label>
+      <button>Save settings</button>
+    </form>
+
+    <section class="panel">
+      <h2>Bridge status</h2>
+      <dl class="settings-list">
+        <div><dt>Workspace slug</dt><dd>{{ org.slug }}</dd></div>
+        <div><dt>Mise bridge</dt><dd>{% if mise_bridge_armed %}Armed{% else %}Disarmed{% endif %}</dd></div>
+        <div><dt>Approved/exported packs</dt><dd>{{ bridge_count }}</dd></div>
+        <div><dt>Public share links</dt><dd>{{ shared_count }}</dd></div>
+        <div><dt>Workspace token</dt><dd>ends in {{ access_token_tail }}</dd></div>
+        <div><dt>Created</dt><dd>{{ org.created_at }}</dd></div>
+      </dl>
+      <form method="post" action="/w/{{ org.slug }}/settings/token">
+        <button class="secondary">Rotate workspace token</button>
+      </form>
+    </section>
+  </div>
+
+  <section class="band settings-band">
+    <h2>Public share links</h2>
+    <div class="list">
+      {% for pack in packs %}
+      <article class="row">
+        <div>
+          <strong>{{ pack.title }}</strong>
+          <p>{{ pack.status }} · {{ pack.created_at }}</p>
+        </div>
+        <div class="settings-actions">
+          {% if pack.share_token %}
+          <a class="small-link" href="/share/{{ pack.share_token }}">Open public link</a>
+          <form method="post" action="/w/{{ org.slug }}/settings/packs/{{ pack.id }}/revoke-share">
+            <button class="ghost">Revoke share link</button>
+          </form>
+          {% else %}
+          <span class="muted">No public link</span>
+          {% endif %}
+        </div>
+      </article>
+      {% else %}
+      <div class="empty-state">
+        <h3>No packs yet</h3>
+        <p>Generated packs will appear here when they have share links to manage.</p>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+</section>
+{% endblock %}

@@ -191,6 +191,69 @@ def test_plan_gate_blocks_locked_recipe_for_starter(tmp_path, monkeypatch):
     assert gen.status_code == 402
 
 
+def test_settings_requires_logged_in_owner(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    signup(client)
+    anon = TestClient(app)
+    res = anon.get("/w/blue-plate/settings", follow_redirects=False)
+    assert res.status_code == 303
+    assert res.headers["location"] == "/login?next=%2Fw%2Fblue-plate%2Fsettings"
+
+
+def test_settings_update_persists_workspace_basics(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    res = signup(client)
+    update = client.post("/w/blue-plate/settings", data={
+        "company": "Blue Plate Cafe",
+        "email": "ops@blueplate.example",
+        "market": "Charlotte",
+        "service_mix": "dine-in, catering",
+        "brand_voice": "polished and local",
+    }, cookies=res.cookies, follow_redirects=False)
+    assert update.status_code == 303
+    assert update.headers["location"] == "/w/blue-plate/settings?notice=saved"
+    org = db.one("SELECT * FROM organizations WHERE slug='blue-plate'")
+    assert org["company"] == "Blue Plate Cafe"
+    assert org["email"] == "ops@blueplate.example"
+    assert org["market"] == "Charlotte"
+    assert org["service_mix"] == "dine-in, catering"
+    assert org["brand_voice"] == "polished and local"
+
+
+def test_settings_rotate_workspace_access_token(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    res = signup(client)
+    old = db.one("SELECT access_token FROM organizations WHERE slug='blue-plate'")["access_token"]
+    rotated = client.post("/w/blue-plate/settings/token",
+                          cookies=res.cookies, follow_redirects=False)
+    assert rotated.status_code == 303
+    assert rotated.headers["location"] == "/w/blue-plate/settings?rotated=1"
+    new = db.one("SELECT access_token FROM organizations WHERE slug='blue-plate'")["access_token"]
+    assert new != old
+
+
+def test_settings_revoke_share_token_removes_public_access(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    res = signup(client)
+    pack = db.one("SELECT * FROM content_packs")
+    share = client.post(f"/w/blue-plate/packs/{pack['id']}/share",
+                        cookies=res.cookies, follow_redirects=False)
+    assert share.status_code == 303
+    token = db.one("SELECT share_token FROM content_packs WHERE id=?", (pack["id"],))["share_token"]
+    assert client.get(f"/share/{token}").status_code == 200
+
+    revoke = client.post(f"/w/blue-plate/settings/packs/{pack['id']}/revoke-share",
+                         cookies=res.cookies, follow_redirects=False)
+    assert revoke.status_code == 303
+    assert revoke.headers["location"] == f"/w/blue-plate/settings?revoked={pack['id']}"
+    assert db.one("SELECT share_token FROM content_packs WHERE id=?", (pack["id"],))["share_token"] is None
+    assert client.get(f"/share/{token}").status_code == 404
+
+
 def test_billing_page_shows_trial_when_stripe_unconfigured(tmp_path, monkeypatch):
     configure_tmp_db(tmp_path, monkeypatch)
     client = TestClient(app)
