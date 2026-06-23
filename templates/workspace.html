@@ -5,34 +5,52 @@
   <div>
     <p class="eyebrow">{{ org.audience }} · {{ subscription.plan_meta.name }} · {{ subscription.status }}</p>
     <h1>{{ org.company or org.name }}</h1>
-    <p>{{ org.brand_voice or "Add a brand voice, menu items, and a campaign. Then generate a pack." }}</p>
+    <p>{{ org.brand_voice or "Your first pack is ready. Refine the inputs, add one more offer, then generate the next version." }}</p>
     <p class="muted">Packs this month: {{ pack_used }}{% if pack_limit is not none %}/{{ pack_limit }}{% else %}/unlimited{% endif %}</p>
   </div>
   <div class="head-actions">
-    <a class="button" href="/w/{{ org.slug }}/billing">Billing</a>
-    <form method="post" action="/logout"><button>Log out</button></form>
+    <a class="button" href="#packs">Latest pack</a>
+    <a class="button secondary" href="/w/{{ org.slug }}/billing">Billing</a>
+    <form method="post" action="/logout"><button class="ghost">Log out</button></form>
+  </div>
+</section>
+
+<section class="next-step">
+  <div>
+    <p class="eyebrow">Next best action</p>
+    {% if latest_pack %}
+      <h2>Review the pack, then generate one sharper version.</h2>
+      <p>Use the inputs below to add a missing dish, launch detail, client objection, or usage angle. The next generated pack will inherit the sharper context.</p>
+    {% else %}
+      <h2>Add one input and generate your first pack.</h2>
+      <p>Platekit works best with one clear dish, offer, or client target plus a business goal.</p>
+    {% endif %}
+  </div>
+  <div class="usage-card">
+    <strong>{{ subscription.plan_meta.name }}</strong>
+    <span>{{ pack_used }}{% if pack_limit is not none %}/{{ pack_limit }}{% else %}/unlimited{% endif %} packs used this month</span>
   </div>
 </section>
 
 <section class="columns">
   <form method="post" action="/w/{{ org.slug }}/profile" class="panel">
-    <h2>Profile</h2>
+    <h2>Positioning</h2>
     <label>Market <input name="market" value="{{ org.market or '' }}" placeholder="Asheville, Charlotte, Raleigh"></label>
     <label>Service mix <input name="service_mix" value="{{ org.service_mix or '' }}" placeholder="dine-in, delivery, catering"></label>
     <label>Brand voice <textarea name="brand_voice">{{ org.brand_voice or '' }}</textarea></label>
-    <button>Save profile</button>
+    <button>Save positioning</button>
   </form>
 
   <form method="post" action="/w/{{ org.slug }}/menu" class="panel">
-    <h2>Menu / offer inputs</h2>
+    <h2>Add an input</h2>
     <label>Name <input name="name" required placeholder="Spring agnolotti"></label>
-    <label>Category <input name="category" placeholder="dish, drink, room, package"></label>
+    <label>Category <input name="category" placeholder="dish, drink, room, client target"></label>
     <label>Notes <textarea name="notes" placeholder="ingredients, margin, audience, visual cues"></textarea></label>
-    <button>Add item</button>
+    <button>Add input</button>
   </form>
 
   <form method="post" action="/w/{{ org.slug }}/campaigns" class="panel">
-    <h2>Campaign</h2>
+    <h2>Create a campaign</h2>
     <label>Title <input name="title" required placeholder="June menu launch"></label>
     <label>Goal <textarea name="goal" placeholder="sell weekend reservations, promote delivery, pitch monthly client"></textarea></label>
     <label>Launch date <input type="date" name="launch_date"></label>
@@ -70,7 +88,7 @@
     {% for item in menu %}
       <span>{{ item.name }}{% if item.category %} · {{ item.category }}{% endif %}</span>
     {% else %}
-      <span>No menu items yet</span>
+      <span>No inputs yet</span>
     {% endfor %}
   </div>
 </section>
@@ -96,7 +114,10 @@
       </div>
     </article>
   {% else %}
-    <p>No packs yet.</p>
+    <div class="empty-state">
+      <h3>No packs yet</h3>
+      <p>Create a campaign above and generate a pack.</p>
+    </div>
   {% endfor %}
 </section>
 {% endblock %}

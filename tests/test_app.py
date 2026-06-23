@@ -31,6 +31,13 @@ def signup(client, **overrides):
         "company": "Blue Plate",
         "audience": "restaurant",
         "plan": "restaurant_growth",
+        "market": "Asheville",
+        "brand_voice": "warm and chef-led",
+        "service_mix": "dine-in and delivery",
+        "first_item": "Spring agnolotti",
+        "first_item_note": "peas, ricotta, lemon",
+        "campaign_goal": "fill weekday reservations",
+        "launch_date": "2026-07-01",
     }
     data.update(overrides)
     return client.post("/signup", data=data, follow_redirects=False)
@@ -42,26 +49,23 @@ def test_signup_workspace_generate_pack(tmp_path, monkeypatch):
     client = TestClient(app)
     res = signup(client)
     assert res.status_code == 303
-    assert res.headers["location"] == "/w/blue-plate"
+    assert res.headers["location"] == "/w/blue-plate#packs"
 
     cookies = res.cookies
     assert client.get("/w/blue-plate", cookies=cookies).status_code == 200
     assert db.one("SELECT role FROM organization_members")["role"] == "owner"
     assert db.one("SELECT status FROM subscriptions")["status"] == "trialing"
 
-    client.post("/w/blue-plate/menu", data={
-        "name": "Spring agnolotti",
-        "category": "dish",
-        "notes": "peas, ricotta, lemon",
-    }, cookies=cookies)
-    campaign = db.one("SELECT id FROM campaigns LIMIT 1")
-    recipe = db.one("SELECT id FROM content_recipes WHERE slug='menu-launch'")
-    gen = client.post(f"/w/blue-plate/campaigns/{campaign['id']}/generate",
-                      data={"recipe_id": recipe["id"]}, cookies=cookies,
-                      follow_redirects=False)
-    assert gen.status_code == 303
+    org = db.one("SELECT * FROM organizations WHERE slug='blue-plate'")
+    assert org["market"] == "Asheville"
+    assert org["brand_voice"] == "warm and chef-led"
+    item = db.one("SELECT * FROM menu_items WHERE org_id=?", (org["id"],))
+    assert item["name"] == "Spring agnolotti"
+    campaign = db.one("SELECT * FROM campaigns LIMIT 1")
+    assert campaign["goal"] == "fill weekday reservations"
     pack = db.one("SELECT * FROM content_packs")
     assert pack and "Spring agnolotti" in pack["body_json"]
+    assert "fill weekday reservations" in pack["body_json"]
 
 
 def test_login_restores_workspace_access(tmp_path, monkeypatch):

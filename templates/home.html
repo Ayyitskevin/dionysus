@@ -4,30 +4,59 @@
 <section class="hero">
   <div>
     <p class="eyebrow">Platekit by Dionysus</p>
-    <h1>Turn one food shoot into a month of sellable restaurant content.</h1>
-    <p class="lede">A companion SaaS for Mise: owners get menu-launch packs and social copy; photographers get shot lists, client-ready briefs, and retainer upsells.</p>
+    <h1>Sell the month after the shoot.</h1>
+    <p class="lede">For restaurants, Platekit turns food photos into campaigns, captions, delivery-app copy, and launch plans. For photographers, it turns strategy work into a recurring SaaS deliverable clients can understand and buy.</p>
   </div>
-  <form class="signup" method="post" action="/signup">
-    <label>Name <input name="name" required></label>
-    <label>Email <input name="email" type="email" required></label>
+  <form class="signup onboarding" method="post" action="/signup">
+    <h2>Build the first pack</h2>
+    <div class="form-grid">
+      <label>Name <input name="name" required></label>
+      <label>Email <input name="email" type="email" required></label>
+    </div>
     <label>Password <input name="password" type="password" minlength="8" required></label>
-    <label>Business or studio <input name="company"></label>
-    <label>I am
-      <select name="audience">
-        <option value="restaurant">Restaurant owner/operator</option>
-        <option value="photographer">Photographer/studio</option>
-      </select>
-    </label>
-    <label>Plan
-      <select name="plan">
-        {% for plan in plans %}
-        <option value="{{ plan.key }}">{{ plan.name }} · {{ plan.price_cents|money }}/mo</option>
-        {% endfor %}
-      </select>
-    </label>
-    <button type="submit">Create workspace</button>
+    <label>Business or studio <input name="company" placeholder="Blue Plate or Avery Photo Co."></label>
+    <div class="form-grid">
+      <label>I am
+        <select name="audience">
+          <option value="restaurant">Restaurant owner/operator</option>
+          <option value="photographer">Photographer/studio</option>
+        </select>
+      </label>
+      <label>Plan
+        <select name="plan">
+          {% for plan in plans %}
+          <option value="{{ plan.key }}">{{ plan.name }} · {{ plan.price_cents|money }}/mo</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="form-grid">
+      <label>Market <input name="market" placeholder="Asheville, Charlotte, Raleigh"></label>
+      <label>Service focus <input name="service_mix" placeholder="dine-in, delivery, catering, retainers"></label>
+    </div>
+    <label>Brand voice <input name="brand_voice" placeholder="warm, premium, playful, chef-led"></label>
+    <label>First dish, offer, or client target <input name="first_item" placeholder="Spring agnolotti, brunch launch, multi-location restaurant group"></label>
+    <label>Useful context <textarea name="first_item_note" placeholder="Ingredients, margin, client problem, visual direction, audience"></textarea></label>
+    <label>First campaign goal <textarea name="campaign_goal" placeholder="Fill weekday reservations, refresh delivery-app listings, pitch a monthly content retainer"></textarea></label>
+    <label>Launch date <input type="date" name="launch_date"></label>
+    <button type="submit">Create my first pack</button>
     <a class="small-link" href="/login">Log in instead</a>
   </form>
+</section>
+
+<section class="band metric-band">
+  <div>
+    <strong>1 shoot</strong>
+    <span>campaign plan, shot list, captions, export angles</span>
+  </div>
+  <div>
+    <strong>3 buyers</strong>
+    <span>owners, marketers, and photographers selling retainers</span>
+  </div>
+  <div>
+    <strong>0 blank pages</strong>
+    <span>the first pack appears immediately after signup</span>
+  </div>
 </section>
 
 <section class="band">
@@ -46,11 +75,11 @@
 <section class="band two">
   <div>
     <h2>For restaurant owners</h2>
-    <p>Draft the next menu-launch campaign, delivery-app refresh, social captions, and press angle from the dishes already being photographed.</p>
+    <p>Start with a menu item or launch goal and leave with social copy, content angles, shot priorities, and delivery-app refresh prompts.</p>
   </div>
   <div>
     <h2>For photographers</h2>
-    <p>Package strategy, shot lists, captions, usage prompts, and retainer upsells as a recurring client deliverable instead of unpaid prep work.</p>
+    <p>Package pre-production thinking, campaign strategy, captions, usage prompts, and retainer upsells as a paid client deliverable.</p>
   </div>
 </section>
 {% endblock %}

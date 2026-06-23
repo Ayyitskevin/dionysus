@@ -141,10 +141,22 @@ def _set_auth_cookies(resp: RedirectResponse, user_id: int, slug: str) -> Redire
     return resp
 
 
+def _first_recipe_slug(audience: str, plan: str) -> str:
+    if audience == "photographer":
+        return "photographer-upsell"
+    if plan == "restaurant_starter":
+        return "menu-launch"
+    return "monthly-retainer"
+
+
 @app.post("/signup")
 async def signup(name: str = Form(...), email: str = Form(...),
                  password: str = Form(...), audience: str = Form(...),
-                 company: str = Form(""), plan: str = Form("restaurant_starter")):
+                 company: str = Form(""), plan: str = Form("restaurant_starter"),
+                 market: str = Form(""), brand_voice: str = Form(""),
+                 service_mix: str = Form(""), first_item: str = Form(""),
+                 first_item_note: str = Form(""), campaign_goal: str = Form(""),
+                 launch_date: str = Form("")):
     if audience not in ("restaurant", "photographer"):
         raise HTTPException(status_code=400, detail="choose restaurant or photographer")
     if len(password) < 8:
@@ -159,24 +171,48 @@ async def signup(name: str = Form(...), email: str = Form(...),
     while db.one("SELECT id FROM organizations WHERE slug=?", (slug,)):
         slug = f"{base}-{n}"
         n += 1
+    market = market.strip()
+    brand_voice = brand_voice.strip()
+    service_mix = service_mix.strip()
+    first_item = first_item.strip() or (
+        "seasonal hero dish" if audience == "restaurant" else "ideal restaurant client")
+    first_item_note = first_item_note.strip()
+    campaign_goal = campaign_goal.strip() or (
+        "turn one shoot into a month of restaurant marketing"
+        if audience == "restaurant" else
+        "sell a recurring content package to a food client")
+    seed_title = "First monthly content pack" if audience == "restaurant" else \
+        "First client campaign kit"
+    recipe_slug = _first_recipe_slug(audience, plan)
     with db.tx() as con:
         cur = con.execute("""INSERT INTO users (email, name, password_hash)
                              VALUES (?,?,?)""",
                           (email, name.strip(), security.hash_password(password)))
         user_id = cur.lastrowid
         cur = con.execute("""INSERT INTO organizations
-                             (slug, name, email, audience, company, plan, access_token)
-                             VALUES (?,?,?,?,?,?,?)""",
+                             (slug, name, email, audience, company, plan, access_token,
+                              market, service_mix, brand_voice)
+                             VALUES (?,?,?,?,?,?,?,?,?,?)""",
                           (slug, name.strip(), email, audience,
-                           company.strip() or None, plan, security.new_token()))
+                           company.strip() or None, plan, security.new_token(),
+                           market or None, service_mix or None, brand_voice or None))
         org_id = cur.lastrowid
         con.execute("""INSERT INTO organization_members (org_id, user_id, role)
                        VALUES (?,?, 'owner')""", (org_id, user_id))
-        seed_title = "First monthly content pack" if audience == "restaurant" else             "First client campaign kit"
-        con.execute("INSERT INTO campaigns (org_id, title, goal) VALUES (?,?,?)",
-                    (org_id, seed_title, "Create sellable food-photo content from one shoot"))
+        con.execute("""INSERT INTO menu_items (org_id, name, category, notes)
+                       VALUES (?,?,?,?)""",
+                    (org_id, first_item,
+                     "priority dish" if audience == "restaurant" else "client target",
+                     first_item_note or None))
+        cur = con.execute("""INSERT INTO campaigns (org_id, title, goal, launch_date)
+                             VALUES (?,?,?,?)""",
+                          (org_id, seed_title, campaign_goal, launch_date.strip() or None))
+        campaign_id = cur.lastrowid
     billing.sync_trial_subscription(org_id, plan)
-    resp = RedirectResponse(f"/w/{slug}", status_code=303)
+    recipe = db.one("SELECT id FROM content_recipes WHERE slug=?", (recipe_slug,))
+    if recipe:
+        jobs.enqueue_generate(campaign_id, recipe["id"])
+    resp = RedirectResponse(f"/w/{slug}#packs", status_code=303)
     return _set_auth_cookies(resp, user_id, slug)
 
 
@@ -188,6 +224,7 @@ async def workspace(request: Request, slug: str):
     packs = db.all_("""SELECT cp.*, cr.name AS recipe_name
                        FROM content_packs cp JOIN content_recipes cr ON cr.id=cp.recipe_id
                        WHERE cp.org_id=? ORDER BY cp.created_at DESC""", (org["id"],))
+    latest_pack = packs[0] if packs else None
     sub = billing.checkout_state(org)
     limit = plans.pack_limit(sub["plan"])
     period = dt.date.today().strftime("%Y-%m")
@@ -196,8 +233,8 @@ async def workspace(request: Request, slug: str):
                   (org["id"], period))["n"]
     return templates.TemplateResponse(request, "workspace.html", {
         "org": org, "user": user, "menu": menu, "campaigns": campaigns,
-        "packs": packs, "recipes": recipes.active(), "subscription": sub,
-        "pack_limit": limit, "pack_used": used,
+        "packs": packs, "latest_pack": latest_pack, "recipes": recipes.active(),
+        "subscription": sub, "pack_limit": limit, "pack_used": used,
         "pack_json": {p["id"]: json.loads(p["body_json"]) for p in packs},
     })
 
