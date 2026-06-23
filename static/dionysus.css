@@ -457,6 +457,18 @@ button:disabled {
   flex-wrap: wrap;
 }
 .settings-actions form { margin: 0; }
+.member-invite {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.8fr) minmax(220px, 1fr) 150px auto;
+  gap: 0.75rem;
+  align-items: end;
+  margin-bottom: 1rem;
+}
+.notice input, .settings-band .row input {
+  margin-top: 0.6rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.84rem;
+}
 .audit-list {
   display: grid;
   gap: 0.75rem;
@@ -486,5 +498,5 @@ button:disabled {
 }
 
 @media (max-width: 880px) {
-  .upgrade-strip, .campaign-actions, .campaign-actions form, .settings-grid, .settings-actions, .audit-row { display: grid; min-width: 0; }
+  .upgrade-strip, .campaign-actions, .campaign-actions form, .settings-grid, .settings-actions, .audit-row, .member-invite { display: grid; min-width: 0; grid-template-columns: 1fr; }
 }

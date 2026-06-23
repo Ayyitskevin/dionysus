@@ -163,6 +163,54 @@ async def home(request: Request):
     return templates.TemplateResponse(request, "home.html", _home_context(request))
 
 
+@app.get("/invite/{token}", response_class=HTMLResponse)
+async def invite_form(request: Request, token: str):
+    invite = _invite_by_token(token)
+    if not invite or invite["status"] != "pending":
+        raise HTTPException(status_code=404, detail="invite not found")
+    return _render_invite(request, invite)
+
+
+@app.post("/invite/{token}/accept")
+async def accept_invite(request: Request, token: str, name: str = Form(""),
+                        password: str = Form(...)):
+    invite = _invite_by_token(token)
+    if not invite or invite["status"] != "pending":
+        raise HTTPException(status_code=404, detail="invite not found")
+    password = password.strip()
+    if len(password) < 8:
+        return _render_invite(
+            request, invite, error="Password must be at least 8 characters.")
+    user = db.one("SELECT * FROM users WHERE email=?", (invite["email"],))
+    if user:
+        if not security.verify_password(password, user["password_hash"]):
+            return _render_invite(
+                request, invite, error="Use the password for this account.")
+        user_id = user["id"]
+    else:
+        display_name = name.strip() or invite["invitee_name"] or invite["email"].split("@", 1)[0]
+        user_id = db.run("""INSERT INTO users (email, name, password_hash)
+                            VALUES (?,?,?)""",
+                         (invite["email"], display_name, security.hash_password(password)))
+    with db.tx() as con:
+        con.execute("""INSERT INTO organization_members (org_id, user_id, role)
+                       VALUES (?,?,?)
+                       ON CONFLICT(org_id, user_id) DO UPDATE SET
+                         role=excluded.role""",
+                    (invite["org_id"], user_id, invite["role"]))
+        con.execute("""UPDATE workspace_invites
+                       SET status='accepted', accepted_by_user_id=?,
+                           accepted_at=datetime('now')
+                       WHERE id=?""", (user_id, invite["id"]))
+    audit.log_event(
+        invite["org_id"], "member.invite_accepted",
+        actor_user_id=user_id, entity_type="user", entity_id=user_id,
+        summary=f"{invite['email']} accepted a {invite['role']} invite.",
+        details={"email": invite["email"], "role": invite["role"]})
+    resp = RedirectResponse(f"/w/{invite['org_slug']}", status_code=303)
+    return _set_auth_cookies(resp, user_id, invite["org_slug"])
+
+
 @app.get("/pricing", response_class=HTMLResponse)
 async def pricing(request: Request):
     return templates.TemplateResponse(request, "pricing.html", {"plans": plans.all_plans()})
@@ -232,8 +280,10 @@ def _membership(user_id: int, org_id: int):
 def _require_workspace(request: Request, slug: str):
     org = _org_by_slug(slug)
     user = _current_user(request)
-    if user and _membership(user["id"], org["id"]):
-        return org, user
+    if user:
+        if _membership(user["id"], org["id"]):
+            return org, user
+        raise HTTPException(status_code=403, detail="workspace access required")
     if security.has_workspace_access(request, slug):
         return org, user
     raise HTTPException(status_code=403, detail="workspace access required")
@@ -258,6 +308,60 @@ def _auth_cookie_kwargs() -> dict:
         "path": "/",
         "secure": config.COOKIE_SECURE,
     }
+
+
+def _member_role(role: str) -> str:
+    role = role.strip().lower()
+    if role not in ("admin", "member"):
+        raise HTTPException(status_code=400, detail="role must be admin or member")
+    return role
+
+
+def _valid_email(email: str) -> str:
+    email = email.strip().lower()
+    if "@" not in email or "." not in email.rsplit("@", 1)[-1]:
+        raise HTTPException(status_code=400, detail="valid email required")
+    return email
+
+
+def _owner_count(org_id: int) -> int:
+    return db.one("""SELECT COUNT(*) AS n FROM organization_members
+                     WHERE org_id=? AND role='owner'""", (org_id,))["n"]
+
+
+def _new_invite_token() -> str:
+    token = security.new_token(32)
+    while db.one("SELECT id FROM workspace_invites WHERE token=?", (token,)):
+        token = security.new_token(32)
+    return token
+
+
+def _invite_url(token: str) -> str:
+    return f"{config.BASE_URL}/invite/{token}"
+
+
+def _invite_by_token(token: str):
+    return db.one("""SELECT wi.*, o.slug AS org_slug, o.name AS org_name,
+                            o.company AS org_company
+                     FROM workspace_invites wi
+                     JOIN organizations o ON o.id=wi.org_id
+                     WHERE wi.token=?""", (token,))
+
+
+def _render_invite(request: Request, invite, *, error: str | None = None):
+    org = {
+        "id": invite["org_id"],
+        "slug": invite["org_slug"],
+        "name": invite["org_name"],
+        "company": invite["org_company"],
+    }
+    existing_user = db.one("SELECT id FROM users WHERE email=?", (invite["email"],))
+    return templates.TemplateResponse(request, "accept_invite.html", {
+        "invite": invite,
+        "org": org,
+        "existing_user": bool(existing_user),
+        "error": error,
+    })
 
 
 def _set_auth_cookies(resp: RedirectResponse, user_id: int, slug: str) -> RedirectResponse:
@@ -423,12 +527,42 @@ async def settings_page(request: Request, slug: str):
     notice = request.query_params.get("notice", "")
     rotated = request.query_params.get("rotated", "") == "1"
     revoked = request.query_params.get("revoked", "")
+    members = db.all_("""SELECT om.user_id, om.role, om.created_at,
+                                u.name, u.email
+                         FROM organization_members om
+                         JOIN users u ON u.id=om.user_id
+                         WHERE om.org_id=?
+                         ORDER BY CASE om.role WHEN 'owner' THEN 0
+                                                WHEN 'admin' THEN 1 ELSE 2 END,
+                                  om.created_at""", (org["id"],))
+    pending_invites = []
+    for row in db.all_("""SELECT * FROM workspace_invites
+                          WHERE org_id=? AND status='pending'
+                          ORDER BY created_at DESC, id DESC""", (org["id"],)):
+        invite = dict(row)
+        invite["invite_url"] = _invite_url(invite["token"])
+        pending_invites.append(invite)
+    invited_raw = request.query_params.get("invited", "")
+    invite_url = ""
+    try:
+        invited_id = int(invited_raw)
+    except ValueError:
+        invited_id = 0
+    if invited_id:
+        invite = db.one("""SELECT token FROM workspace_invites
+                           WHERE id=? AND org_id=? AND status='pending'""",
+                        (invited_id, org["id"]))
+        if invite:
+            invite_url = _invite_url(invite["token"])
     return templates.TemplateResponse(request, "settings.html", {
         "org": org,
         "user": user,
         "member": member,
         "subscription": sub,
         "packs": packs,
+        "members": members,
+        "pending_invites": pending_invites,
+        "invite_url": invite_url,
         "shared_count": shared_count,
         "bridge_count": bridge_count,
         "mise_bridge_armed": bool(config.MISE_IMPORT_TOKEN),
@@ -510,6 +644,107 @@ async def revoke_pack_share(request: Request, slug: str, pack_id: int):
         summary=f"Revoked public share link for {pack['title']}.",
         details={"pack_title": pack["title"]})
     return RedirectResponse(f"/w/{slug}/settings?revoked={pack_id}", status_code=303)
+
+
+@app.post("/w/{slug}/settings/members/invite")
+async def invite_member(request: Request, slug: str, email: str = Form(...),
+                        role: str = Form("member"), invitee_name: str = Form("")):
+    org, user, _ = _require_owner(request, slug)
+    email = _valid_email(email)
+    role = _member_role(role)
+    invitee_name = invitee_name.strip() or None
+    existing_member = db.one("""SELECT om.user_id FROM organization_members om
+                                JOIN users u ON u.id=om.user_id
+                                WHERE om.org_id=? AND u.email=?""",
+                             (org["id"], email))
+    if existing_member:
+        raise HTTPException(status_code=400, detail="user is already a workspace member")
+    pending = db.one("""SELECT * FROM workspace_invites
+                        WHERE org_id=? AND email=? AND status='pending'""",
+                     (org["id"], email))
+    if pending:
+        db.run("""UPDATE workspace_invites
+                  SET role=?, invitee_name=?, invited_by_user_id=?
+                  WHERE id=?""", (role, invitee_name, user["id"], pending["id"]))
+        invite_id = pending["id"]
+        summary = f"Refreshed {role} invite for {email}."
+    else:
+        token = _new_invite_token()
+        invite_id = db.run("""INSERT INTO workspace_invites
+                              (org_id, email, invitee_name, role, token, invited_by_user_id)
+                              VALUES (?,?,?,?,?,?)""",
+                           (org["id"], email, invitee_name, role, token, user["id"]))
+        summary = f"Invited {email} as {role}."
+    audit.log_event(
+        org["id"], "member.invited",
+        actor_user_id=user["id"], entity_type="workspace_invite", entity_id=invite_id,
+        summary=summary, details={"email": email, "role": role})
+    return RedirectResponse(f"/w/{slug}/settings?invited={invite_id}", status_code=303)
+
+
+@app.post("/w/{slug}/settings/invites/{invite_id}/revoke")
+async def revoke_invite(request: Request, slug: str, invite_id: int):
+    org, user, _ = _require_owner(request, slug)
+    invite = db.one("""SELECT * FROM workspace_invites
+                       WHERE id=? AND org_id=? AND status='pending'""",
+                    (invite_id, org["id"]))
+    if not invite:
+        raise HTTPException(status_code=404, detail="invite not found")
+    db.run("""UPDATE workspace_invites
+              SET status='revoked', revoked_at=datetime('now')
+              WHERE id=?""", (invite_id,))
+    audit.log_event(
+        org["id"], "member.invite_revoked",
+        actor_user_id=user["id"], entity_type="workspace_invite", entity_id=invite_id,
+        summary=f"Revoked pending invite for {invite['email']}.",
+        details={"email": invite["email"], "role": invite["role"]})
+    return RedirectResponse(f"/w/{slug}/settings?invite_revoked=1", status_code=303)
+
+
+@app.post("/w/{slug}/settings/members/{user_id}/role")
+async def update_member_role(request: Request, slug: str, user_id: int,
+                             role: str = Form(...)):
+    org, user, _ = _require_owner(request, slug)
+    role = _member_role(role)
+    if user_id == user["id"]:
+        raise HTTPException(status_code=400, detail="cannot change your own role")
+    target = db.one("""SELECT om.*, u.email FROM organization_members om
+                       JOIN users u ON u.id=om.user_id
+                       WHERE om.org_id=? AND om.user_id=?""", (org["id"], user_id))
+    if not target:
+        raise HTTPException(status_code=404, detail="member not found")
+    if target["role"] == "owner":
+        raise HTTPException(status_code=400, detail="owner role cannot be changed here")
+    db.run("""UPDATE organization_members SET role=?
+              WHERE org_id=? AND user_id=?""", (role, org["id"], user_id))
+    audit.log_event(
+        org["id"], "member.role_updated",
+        actor_user_id=user["id"], entity_type="user", entity_id=user_id,
+        summary=f"Changed {target['email']} from {target['role']} to {role}.",
+        details={"email": target["email"], "old_role": target["role"], "role": role})
+    return RedirectResponse(f"/w/{slug}/settings?member_role=1", status_code=303)
+
+
+@app.post("/w/{slug}/settings/members/{user_id}/revoke")
+async def revoke_member(request: Request, slug: str, user_id: int):
+    org, user, _ = _require_owner(request, slug)
+    if user_id == user["id"]:
+        raise HTTPException(status_code=400, detail="cannot revoke your own access")
+    target = db.one("""SELECT om.*, u.email FROM organization_members om
+                       JOIN users u ON u.id=om.user_id
+                       WHERE om.org_id=? AND om.user_id=?""", (org["id"], user_id))
+    if not target:
+        raise HTTPException(status_code=404, detail="member not found")
+    if target["role"] == "owner" and _owner_count(org["id"]) <= 1:
+        raise HTTPException(status_code=400, detail="cannot revoke the last owner")
+    db.run("""DELETE FROM organization_members
+              WHERE org_id=? AND user_id=?""", (org["id"], user_id))
+    audit.log_event(
+        org["id"], "member.revoked",
+        actor_user_id=user["id"], entity_type="user", entity_id=user_id,
+        summary=f"Revoked workspace access for {target['email']}.",
+        details={"email": target["email"], "role": target["role"]})
+    return RedirectResponse(f"/w/{slug}/settings?member_revoked=1", status_code=303)
 
 
 @app.post("/w/{slug}/profile")

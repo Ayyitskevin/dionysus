@@ -249,6 +249,105 @@ def test_settings_rotate_workspace_access_token(tmp_path, monkeypatch):
     assert json.loads(event["details_json"])["token_tail"] == new[-6:]
 
 
+def test_settings_invites_new_member_and_acceptance_creates_access(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    res = signup(client)
+    invite = client.post("/w/blue-plate/settings/members/invite", data={
+        "invitee_name": "Jordan",
+        "email": "jordan@example.com",
+        "role": "member",
+    }, cookies=res.cookies, follow_redirects=False)
+    assert invite.status_code == 303
+    pending = db.one("SELECT * FROM workspace_invites WHERE email='jordan@example.com'")
+    assert pending and pending["status"] == "pending"
+    assert pending["role"] == "member"
+    assert invite.headers["location"] == f"/w/blue-plate/settings?invited={pending['id']}"
+    settings = client.get(invite.headers["location"], cookies=res.cookies)
+    assert settings.status_code == 200
+    assert "Invite ready." in settings.text
+    assert f"http://localhost:8450/invite/{pending['token']}" in settings.text
+    assert "jordan@example.com" in settings.text
+    event = db.one("SELECT * FROM audit_events WHERE action='member.invited'")
+    assert event and "jordan@example.com" in event["summary"]
+
+    invitee = TestClient(app)
+    form = invitee.get(f"/invite/{pending['token']}")
+    assert form.status_code == 200
+    assert "Join Blue Plate" in form.text
+    accepted = invitee.post(f"/invite/{pending['token']}/accept", data={
+        "name": "Jordan",
+        "password": "correct-horse",
+    }, follow_redirects=False)
+    assert accepted.status_code == 303
+    assert accepted.headers["location"] == "/w/blue-plate"
+    user = db.one("SELECT * FROM users WHERE email='jordan@example.com'")
+    member = db.one("SELECT * FROM organization_members WHERE user_id=?", (user["id"],))
+    assert member["role"] == "member"
+    accepted_invite = db.one("SELECT * FROM workspace_invites WHERE id=?", (pending["id"],))
+    assert accepted_invite["status"] == "accepted"
+    assert invitee.get("/w/blue-plate", cookies=accepted.cookies).status_code == 200
+    assert invitee.get("/w/blue-plate/settings", cookies=accepted.cookies).status_code == 403
+    accepted_event = db.one("SELECT * FROM audit_events WHERE action='member.invite_accepted'")
+    assert accepted_event and accepted_event["actor_user_id"] == user["id"]
+
+
+def test_member_role_update_and_revoke_remove_access(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    owner = TestClient(app)
+    res = signup(owner)
+    invite = owner.post("/w/blue-plate/settings/members/invite", data={
+        "email": "casey@example.com",
+        "role": "member",
+    }, cookies=res.cookies, follow_redirects=False)
+    pending = db.one("SELECT * FROM workspace_invites WHERE email='casey@example.com'")
+    member_client = TestClient(app)
+    accepted = member_client.post(f"/invite/{pending['token']}/accept", data={
+        "name": "Casey",
+        "password": "correct-horse",
+    }, follow_redirects=False)
+    user = db.one("SELECT * FROM users WHERE email='casey@example.com'")
+
+    role = owner.post(f"/w/blue-plate/settings/members/{user['id']}/role",
+                      data={"role": "admin"}, cookies=res.cookies,
+                      follow_redirects=False)
+    assert role.status_code == 303
+    assert db.one("SELECT role FROM organization_members WHERE user_id=?",
+                  (user["id"],))["role"] == "admin"
+    assert member_client.get("/w/blue-plate/settings",
+                             cookies=accepted.cookies).status_code == 200
+
+    revoke = owner.post(f"/w/blue-plate/settings/members/{user['id']}/revoke",
+                        cookies=res.cookies, follow_redirects=False)
+    assert revoke.status_code == 303
+    assert db.one("SELECT * FROM organization_members WHERE user_id=?",
+                  (user["id"],)) is None
+    assert member_client.get("/w/blue-plate", cookies=accepted.cookies).status_code == 403
+    actions = [row["action"] for row in db.all_(
+        "SELECT action FROM audit_events ORDER BY id")]
+    assert "member.role_updated" in actions
+    assert "member.revoked" in actions
+
+
+def test_pending_invite_can_be_revoked(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    res = signup(client)
+    client.post("/w/blue-plate/settings/members/invite", data={
+        "email": "taylor@example.com",
+        "role": "admin",
+    }, cookies=res.cookies, follow_redirects=False)
+    invite = db.one("SELECT * FROM workspace_invites WHERE email='taylor@example.com'")
+    revoked = client.post(f"/w/blue-plate/settings/invites/{invite['id']}/revoke",
+                          cookies=res.cookies, follow_redirects=False)
+    assert revoked.status_code == 303
+    assert db.one("SELECT status FROM workspace_invites WHERE id=?",
+                  (invite["id"],))["status"] == "revoked"
+    assert client.get(f"/invite/{invite['token']}").status_code == 404
+    event = db.one("SELECT * FROM audit_events WHERE action='member.invite_revoked'")
+    assert event and "taylor@example.com" in event["summary"]
+
+
 def test_settings_revoke_share_token_removes_public_access(tmp_path, monkeypatch):
     configure_tmp_db(tmp_path, monkeypatch)
     client = TestClient(app)

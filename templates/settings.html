@@ -23,6 +23,18 @@
   {% if revoked %}
   <div class="notice warning"><strong>Share link revoked.</strong><span>The previous public URL for pack #{{ revoked }} no longer resolves.</span></div>
   {% endif %}
+  {% if invite_url %}
+  <div class="notice success"><strong>Invite ready.</strong><span>Copy the invite link below and send it to the new member.</span><input readonly value="{{ invite_url }}"></div>
+  {% endif %}
+  {% if request.query_params.get("invite_revoked") %}
+  <div class="notice warning"><strong>Invite revoked.</strong><span>The pending invite link no longer works.</span></div>
+  {% endif %}
+  {% if request.query_params.get("member_role") %}
+  <div class="notice success"><strong>Role updated.</strong><span>The member role was changed.</span></div>
+  {% endif %}
+  {% if request.query_params.get("member_revoked") %}
+  <div class="notice warning"><strong>Member revoked.</strong><span>The user no longer has workspace access.</span></div>
+  {% endif %}
 
   <div class="settings-grid">
     <form method="post" action="/w/{{ org.slug }}/settings" class="panel">
@@ -50,6 +62,72 @@
       </form>
     </section>
   </div>
+
+  <section class="band settings-band">
+    <h2>Members</h2>
+    <form method="post" action="/w/{{ org.slug }}/settings/members/invite" class="member-invite">
+      <label>Name <input name="invitee_name" placeholder="Optional"></label>
+      <label>Email <input name="email" type="email" required></label>
+      <label>Role
+        <select name="role">
+          <option value="member">Member</option>
+          <option value="admin">Admin</option>
+        </select>
+      </label>
+      <button>Invite</button>
+    </form>
+    <div class="list">
+      {% for m in members %}
+      <article class="row">
+        <div>
+          <strong>{{ m.name }}</strong>
+          <p>{{ m.email }} · {{ m.role }} · joined {{ m.created_at }}</p>
+        </div>
+        <div class="settings-actions">
+          {% if m.user_id == user.id %}
+          <span class="muted">Current user</span>
+          {% elif m.role == "owner" %}
+          <span class="muted">Owner</span>
+          {% else %}
+          <form method="post" action="/w/{{ org.slug }}/settings/members/{{ m.user_id }}/role">
+            <select name="role">
+              <option value="member" {% if m.role == "member" %}selected{% endif %}>Member</option>
+              <option value="admin" {% if m.role == "admin" %}selected{% endif %}>Admin</option>
+            </select>
+            <button class="secondary">Update role</button>
+          </form>
+          <form method="post" action="/w/{{ org.slug }}/settings/members/{{ m.user_id }}/revoke">
+            <button class="ghost">Revoke access</button>
+          </form>
+          {% endif %}
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+
+    <h3>Pending invites</h3>
+    <div class="list">
+      {% for invite in pending_invites %}
+      <article class="row">
+        <div>
+          <strong>{{ invite.email }}</strong>
+          <p>{{ invite.role }} · invited {{ invite.created_at }}</p>
+          <input readonly value="{{ invite.invite_url }}">
+        </div>
+        <div class="settings-actions">
+          <form method="post" action="/w/{{ org.slug }}/settings/invites/{{ invite.id }}/revoke">
+            <button class="ghost">Revoke invite</button>
+          </form>
+        </div>
+      </article>
+      {% else %}
+      <div class="empty-state">
+        <h3>No pending invites</h3>
+        <p>New invite links will appear here until accepted or revoked.</p>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
 
   <section class="band settings-band">
     <h2>Public share links</h2>
