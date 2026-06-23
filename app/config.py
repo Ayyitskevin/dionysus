@@ -26,5 +26,10 @@ STRIPE_PRICE_RESTAURANT_GROWTH = os.environ.get("DIONYSUS_STRIPE_PRICE_RESTAURAN
 STRIPE_PRICE_PHOTOGRAPHER_STUDIO = os.environ.get("DIONYSUS_STRIPE_PRICE_PHOTOGRAPHER_STUDIO", "")
 
 
+COOKIE_SECURE = os.environ.get("DIONYSUS_COOKIE_SECURE", "false").lower() in (
+    "1", "true", "yes")
+ENV = os.environ.get("DIONYSUS_ENV", "development")
+
+
 def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)

@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import billing, config, db, jobs, plans, recipes, security
+from . import billing, config, db, jobs, plans, readiness, recipes, security
 from .render import ROOT, templates
 
 logging.basicConfig(level=logging.INFO,
@@ -49,6 +49,11 @@ async def branded_errors(request: Request, exc: StarletteHTTPException):
 @app.get("/healthz")
 async def healthz():
     return {"ok": True, "service": "dionysus", "jobs_pending": jobs.pending_count()}
+
+
+@app.get("/readiness")
+async def readiness_check():
+    return readiness.summary()
 
 
 @app.get("/", response_class=HTMLResponse)

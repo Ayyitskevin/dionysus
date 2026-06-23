@@ -165,3 +165,42 @@ def test_stripe_webhook_marks_subscription_active(tmp_path, monkeypatch):
     assert sub["status"] == "active"
     assert sub["stripe_customer_id"] == "cus_123"
     assert sub["stripe_subscription_id"] == "sub_123"
+
+
+
+def test_readiness_fails_with_default_dev_config(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    from app import config
+    config.SECRET_KEY = "dev-dionysus-secret"
+    config.BASE_URL = "http://localhost:8450"
+    config.COOKIE_SECURE = False
+    config.STRIPE_SECRET_KEY = ""
+    config.STRIPE_WEBHOOK_SECRET = ""
+    config.STRIPE_PRICE_RESTAURANT_STARTER = ""
+    config.STRIPE_PRICE_RESTAURANT_GROWTH = ""
+    config.STRIPE_PRICE_PHOTOGRAPHER_STUDIO = ""
+    config.MISE_IMPORT_TOKEN = ""
+    client = TestClient(app)
+    res = client.get("/readiness")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ready"] is False
+    assert any(c["key"] == "secret_key" and not c["ok"] for c in body["checks"])
+
+
+def test_readiness_passes_when_production_env_is_armed(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    from app import config
+    config.SECRET_KEY = "a-real-secret-value"
+    config.BASE_URL = "https://platekit.example.com"
+    config.COOKIE_SECURE = True
+    config.STRIPE_SECRET_KEY = "sk_test_123"
+    config.STRIPE_WEBHOOK_SECRET = "whsec_123"
+    config.STRIPE_PRICE_RESTAURANT_STARTER = "price_123"
+    config.STRIPE_PRICE_RESTAURANT_GROWTH = "price_456"
+    config.STRIPE_PRICE_PHOTOGRAPHER_STUDIO = "price_789"
+    config.MISE_IMPORT_TOKEN = "mise-token"
+    client = TestClient(app)
+    res = client.get("/readiness")
+    assert res.status_code == 200
+    assert res.json()["ready"] is True

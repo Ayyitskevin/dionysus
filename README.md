@@ -78,6 +78,25 @@ Production starting points:
 - `ops/env.example`
 - `ops/dionysus.service`
 
+
+
+## Production Readiness
+
+Use the deployment runbook before putting a domain in front of the app:
+
+- `ops/deploy.md`
+- `ops/env.example`
+- `ops/dionysus.service`
+
+The app exposes `/readiness` and a CLI gate:
+
+```bash
+python -m app.cli check-production
+```
+
+The gate fails until production secrets, HTTPS base URL, secure cookies, Stripe
+keys, Stripe price IDs, webhook secret, and Mise bridge token are configured.
+
 ## Verification
 
 ```bash
