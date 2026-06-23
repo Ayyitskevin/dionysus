@@ -50,11 +50,13 @@ DIONYSUS_MISE_IMPORT_TOKEN=optional-service-token
 
 ```text
 GET /api/mise/organizations/{slug}/latest-pack
+POST /api/mise/organizations/{slug}/argus-pack
 Authorization: Bearer <token>
 ```
 
-That endpoint gives Mise/Odysseus a clean bridge to the latest Dionysus content
-pack without coupling the two apps.
+`latest-pack` gives Mise a read bridge to approved Dionysus content. When Mise's
+Argus callback fires, it can `POST argus-pack` with `argus_run_id` (and optional
+`mise_gallery_id`) to draft keyword-enriched captions without coupling the apps.
 
 
 

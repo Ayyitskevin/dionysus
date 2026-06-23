@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import audit, billing, config, db, jobs, packs as pack_utils, plans, readiness, recipes, security
+from . import audit, billing, config, db, jobs, mise_hook, packs as pack_utils, plans, readiness, recipes, security
 from .render import ROOT, templates
 
 logging.basicConfig(level=logging.INFO,
@@ -1206,3 +1206,49 @@ async def latest_pack_for_mise(slug: str, include_drafts: bool = False):
     if not pack:
         return {"matched": True, "org": slug, "pack": None}
     return {"matched": True, "org": slug, "pack": _pack_api_payload(pack)}
+
+
+@app.post("/api/mise/organizations/{slug}/argus-pack",
+          dependencies=[Depends(security.require_mise_token)])
+async def mise_argus_pack_hook(slug: str, request: Request):
+    """Mise Argus callback hook — draft a keyword-enriched pack from one run."""
+    org = _org_by_slug(slug)
+    if not org:
+        raise HTTPException(status_code=404, detail="organization not found")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="json body required")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="json object required")
+    try:
+        argus_run_id = int(body.get("argus_run_id") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="argus_run_id must be an integer")
+    if argus_run_id <= 0:
+        raise HTTPException(status_code=400, detail="argus_run_id required")
+    mise_gallery_id = body.get("mise_gallery_id")
+    if mise_gallery_id is not None:
+        try:
+            mise_gallery_id = int(mise_gallery_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="mise_gallery_id must be an integer")
+        if mise_gallery_id <= 0:
+            mise_gallery_id = None
+    gallery_title = body.get("gallery_title")
+    if gallery_title is not None and not isinstance(gallery_title, str):
+        raise HTTPException(status_code=400, detail="gallery_title must be a string")
+    recipe_slug = body.get("recipe_slug")
+    if recipe_slug is not None and not isinstance(recipe_slug, str):
+        raise HTTPException(status_code=400, detail="recipe_slug must be a string")
+    try:
+        result = mise_hook.generate_from_argus(
+            org,
+            argus_run_id=argus_run_id,
+            mise_gallery_id=mise_gallery_id,
+            gallery_title=gallery_title,
+            recipe_slug=(recipe_slug or "").strip() or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "org": slug, **result}
