@@ -1,5 +1,6 @@
 """Dionysus / Platekit — Photography AI SaaS for restaurants and photographers."""
 
+from contextlib import asynccontextmanager
 import csv
 import datetime as dt
 import io
@@ -19,14 +20,16 @@ from .render import ROOT, templates
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-app = FastAPI(title="Dionysus", version="0.2.0", docs_url=None,
-              redoc_url=None, openapi_url=None)
-app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
-
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     db.migrate()
+    yield
+
+
+app = FastAPI(title="Dionysus", version="0.2.0", docs_url=None,
+              redoc_url=None, openapi_url=None, lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 
 @app.middleware("http")

@@ -4,5 +4,5 @@ jinja2
 itsdangerous
 python-multipart
 pytest
-httpx
+httpx2
 stripe

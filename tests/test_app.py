@@ -82,8 +82,7 @@ def test_signup_workspace_generate_pack(tmp_path, monkeypatch):
     assert res.status_code == 303
     assert res.headers["location"] == "/w/blue-plate#packs"
 
-    cookies = res.cookies
-    assert client.get("/w/blue-plate", cookies=cookies).status_code == 200
+    assert client.get("/w/blue-plate").status_code == 200
     assert db.one("SELECT role FROM organization_members")["role"] == "owner"
     assert db.one("SELECT status FROM subscriptions")["status"] == "trialing"
 
@@ -130,7 +129,7 @@ def test_login_restores_workspace_access(tmp_path, monkeypatch):
     }, follow_redirects=False)
     assert login.status_code == 303
     assert login.headers["location"] == "/w/blue-plate"
-    assert client.get("/w/blue-plate", cookies=login.cookies).status_code == 200
+    assert client.get("/w/blue-plate").status_code == 200
 
 
 def test_workspace_redirects_anonymous_to_login_next(tmp_path, monkeypatch):
@@ -154,7 +153,7 @@ def test_login_honors_safe_workspace_next(tmp_path, monkeypatch):
     }, follow_redirects=False)
     assert login.status_code == 303
     assert login.headers["location"] == "/w/blue-plate/billing"
-    assert client.get("/w/blue-plate/billing", cookies=login.cookies).status_code == 200
+    assert client.get("/w/blue-plate/billing").status_code == 200
 
 
 def test_login_rejects_external_next(tmp_path, monkeypatch):
@@ -185,11 +184,10 @@ def test_plan_gate_blocks_locked_recipe_for_starter(tmp_path, monkeypatch):
     configure_tmp_db(tmp_path, monkeypatch)
     client = TestClient(app)
     res = signup(client, plan="restaurant_starter")
-    cookies = res.cookies
     campaign = db.one("SELECT id FROM campaigns LIMIT 1")
     recipe = db.one("SELECT id FROM content_recipes WHERE slug='press-seasonal'")
     gen = client.post(f"/w/blue-plate/campaigns/{campaign['id']}/generate",
-                      data={"recipe_id": recipe["id"]}, cookies=cookies,
+                      data={"recipe_id": recipe["id"]},
                       follow_redirects=False)
     assert gen.status_code == 402
 
@@ -214,7 +212,7 @@ def test_settings_update_persists_workspace_basics(tmp_path, monkeypatch):
         "market": "Charlotte",
         "service_mix": "dine-in, catering",
         "brand_voice": "polished and local",
-    }, cookies=res.cookies, follow_redirects=False)
+    }, follow_redirects=False)
     assert update.status_code == 303
     assert update.headers["location"] == "/w/blue-plate/settings?notice=saved"
     org = db.one("SELECT * FROM organizations WHERE slug='blue-plate'")
@@ -229,7 +227,7 @@ def test_settings_update_persists_workspace_basics(tmp_path, monkeypatch):
     assert "contact email" in event["summary"]
     assert "brand voice" in event["summary"]
     assert json.loads(event["details_json"])["fields"]
-    settings = client.get("/w/blue-plate/settings", cookies=res.cookies)
+    settings = client.get("/w/blue-plate/settings")
     assert "Activity trail" in settings.text
     assert "Updated workspace basics" in settings.text
     assert "Avery (avery@example.com)" in settings.text
@@ -240,8 +238,7 @@ def test_settings_rotate_workspace_access_token(tmp_path, monkeypatch):
     client = TestClient(app)
     res = signup(client)
     old = db.one("SELECT access_token FROM organizations WHERE slug='blue-plate'")["access_token"]
-    rotated = client.post("/w/blue-plate/settings/token",
-                          cookies=res.cookies, follow_redirects=False)
+    rotated = client.post("/w/blue-plate/settings/token", follow_redirects=False)
     assert rotated.status_code == 303
     assert rotated.headers["location"] == "/w/blue-plate/settings?rotated=1"
     new = db.one("SELECT access_token FROM organizations WHERE slug='blue-plate'")["access_token"]
@@ -259,13 +256,13 @@ def test_settings_invites_new_member_and_acceptance_creates_access(tmp_path, mon
         "invitee_name": "Jordan",
         "email": "jordan@example.com",
         "role": "member",
-    }, cookies=res.cookies, follow_redirects=False)
+    }, follow_redirects=False)
     assert invite.status_code == 303
     pending = db.one("SELECT * FROM workspace_invites WHERE email='jordan@example.com'")
     assert pending and pending["status"] == "pending"
     assert pending["role"] == "member"
     assert invite.headers["location"] == f"/w/blue-plate/settings?invited={pending['id']}"
-    settings = client.get(invite.headers["location"], cookies=res.cookies)
+    settings = client.get(invite.headers["location"])
     assert settings.status_code == 200
     assert "Invite ready." in settings.text
     assert f"http://localhost:8450/invite/{pending['token']}" in settings.text
@@ -288,8 +285,8 @@ def test_settings_invites_new_member_and_acceptance_creates_access(tmp_path, mon
     assert member["role"] == "member"
     accepted_invite = db.one("SELECT * FROM workspace_invites WHERE id=?", (pending["id"],))
     assert accepted_invite["status"] == "accepted"
-    assert invitee.get("/w/blue-plate", cookies=accepted.cookies).status_code == 200
-    assert invitee.get("/w/blue-plate/settings", cookies=accepted.cookies).status_code == 403
+    assert invitee.get("/w/blue-plate").status_code == 200
+    assert invitee.get("/w/blue-plate/settings").status_code == 403
     accepted_event = db.one("SELECT * FROM audit_events WHERE action='member.invite_accepted'")
     assert accepted_event and accepted_event["actor_user_id"] == user["id"]
 
@@ -301,7 +298,7 @@ def test_member_role_update_and_revoke_remove_access(tmp_path, monkeypatch):
     invite = owner.post("/w/blue-plate/settings/members/invite", data={
         "email": "casey@example.com",
         "role": "member",
-    }, cookies=res.cookies, follow_redirects=False)
+    }, follow_redirects=False)
     pending = db.one("SELECT * FROM workspace_invites WHERE email='casey@example.com'")
     member_client = TestClient(app)
     accepted = member_client.post(f"/invite/{pending['token']}/accept", data={
@@ -311,20 +308,18 @@ def test_member_role_update_and_revoke_remove_access(tmp_path, monkeypatch):
     user = db.one("SELECT * FROM users WHERE email='casey@example.com'")
 
     role = owner.post(f"/w/blue-plate/settings/members/{user['id']}/role",
-                      data={"role": "admin"}, cookies=res.cookies,
+                      data={"role": "admin"},
                       follow_redirects=False)
     assert role.status_code == 303
     assert db.one("SELECT role FROM organization_members WHERE user_id=?",
                   (user["id"],))["role"] == "admin"
-    assert member_client.get("/w/blue-plate/settings",
-                             cookies=accepted.cookies).status_code == 200
+    assert member_client.get("/w/blue-plate/settings").status_code == 200
 
-    revoke = owner.post(f"/w/blue-plate/settings/members/{user['id']}/revoke",
-                        cookies=res.cookies, follow_redirects=False)
+    revoke = owner.post(f"/w/blue-plate/settings/members/{user['id']}/revoke", follow_redirects=False)
     assert revoke.status_code == 303
     assert db.one("SELECT * FROM organization_members WHERE user_id=?",
                   (user["id"],)) is None
-    assert member_client.get("/w/blue-plate", cookies=accepted.cookies).status_code == 403
+    assert member_client.get("/w/blue-plate").status_code == 403
     actions = [row["action"] for row in db.all_(
         "SELECT action FROM audit_events ORDER BY id")]
     assert "member.role_updated" in actions
@@ -338,10 +333,9 @@ def test_pending_invite_can_be_revoked(tmp_path, monkeypatch):
     client.post("/w/blue-plate/settings/members/invite", data={
         "email": "taylor@example.com",
         "role": "admin",
-    }, cookies=res.cookies, follow_redirects=False)
+    }, follow_redirects=False)
     invite = db.one("SELECT * FROM workspace_invites WHERE email='taylor@example.com'")
-    revoked = client.post(f"/w/blue-plate/settings/invites/{invite['id']}/revoke",
-                          cookies=res.cookies, follow_redirects=False)
+    revoked = client.post(f"/w/blue-plate/settings/invites/{invite['id']}/revoke", follow_redirects=False)
     assert revoked.status_code == 303
     assert db.one("SELECT status FROM workspace_invites WHERE id=?",
                   (invite["id"],))["status"] == "revoked"
@@ -355,14 +349,12 @@ def test_settings_revoke_share_token_removes_public_access(tmp_path, monkeypatch
     client = TestClient(app)
     res = signup(client)
     pack = db.one("SELECT * FROM content_packs")
-    share = client.post(f"/w/blue-plate/packs/{pack['id']}/share",
-                        cookies=res.cookies, follow_redirects=False)
+    share = client.post(f"/w/blue-plate/packs/{pack['id']}/share", follow_redirects=False)
     assert share.status_code == 303
     token = db.one("SELECT share_token FROM content_packs WHERE id=?", (pack["id"],))["share_token"]
     assert client.get(f"/share/{token}").status_code == 200
 
-    revoke = client.post(f"/w/blue-plate/settings/packs/{pack['id']}/revoke-share",
-                         cookies=res.cookies, follow_redirects=False)
+    revoke = client.post(f"/w/blue-plate/settings/packs/{pack['id']}/revoke-share", follow_redirects=False)
     assert revoke.status_code == 303
     assert revoke.headers["location"] == f"/w/blue-plate/settings?revoked={pack['id']}"
     assert db.one("SELECT share_token FROM content_packs WHERE id=?", (pack["id"],))["share_token"] is None
@@ -378,11 +370,9 @@ def test_pack_approve_and_workspace_export_write_audit_events(tmp_path, monkeypa
     client = TestClient(app)
     res = signup(client)
     pack = db.one("SELECT * FROM content_packs")
-    approve = client.post(f"/w/blue-plate/packs/{pack['id']}/approve",
-                          cookies=res.cookies, follow_redirects=False)
+    approve = client.post(f"/w/blue-plate/packs/{pack['id']}/approve", follow_redirects=False)
     assert approve.status_code == 303
-    export = client.get(f"/w/blue-plate/packs/{pack['id']}/export.md",
-                        cookies=res.cookies)
+    export = client.get(f"/w/blue-plate/packs/{pack['id']}/export.md")
     assert export.status_code == 200
     actions = [row["action"] for row in db.all_(
         "SELECT action FROM audit_events ORDER BY id")]
@@ -400,13 +390,11 @@ def test_audit_filters_activity_by_action(tmp_path, monkeypatch):
         "market": "Charlotte",
         "service_mix": "dine-in, catering",
         "brand_voice": "polished and local",
-    }, cookies=res.cookies, follow_redirects=False)
-    client.post("/w/blue-plate/settings/token",
-                cookies=res.cookies, follow_redirects=False)
+    }, follow_redirects=False)
+    client.post("/w/blue-plate/settings/token", follow_redirects=False)
 
     page = client.get(
-        "/w/blue-plate/settings?audit_action=workspace.token_rotated#activity",
-        cookies=res.cookies)
+        "/w/blue-plate/settings?audit_action=workspace.token_rotated#activity")
     assert page.status_code == 200
     assert "Rotated workspace token" in page.text
     assert "Updated workspace basics" not in page.text
@@ -430,8 +418,7 @@ def test_audit_filters_activity_by_actor_and_date(tmp_path, monkeypatch):
            (org["id"], owner["id"], "user.test", "User test event", "{}", "2026-01-02 12:00:00"))
 
     page = client.get(
-        "/w/blue-plate/settings?audit_actor=system&audit_from=2026-01-02&audit_to=2026-01-02",
-        cookies=res.cookies)
+        "/w/blue-plate/settings?audit_actor=system&audit_from=2026-01-02&audit_to=2026-01-02")
     assert page.status_code == 200
     assert "System test event" in page.text
     assert "User test event" not in page.text
@@ -443,19 +430,17 @@ def test_audit_export_json_and_csv_respect_filters(tmp_path, monkeypatch):
     configure_tmp_db(tmp_path, monkeypatch)
     client = TestClient(app)
     res = signup(client)
-    client.post("/w/blue-plate/settings/token",
-                cookies=res.cookies, follow_redirects=False)
+    client.post("/w/blue-plate/settings/token", follow_redirects=False)
     client.post("/w/blue-plate/settings", data={
         "company": "Blue Plate Cafe",
         "email": "ops@blueplate.example",
         "market": "Charlotte",
         "service_mix": "dine-in, catering",
         "brand_voice": "polished and local",
-    }, cookies=res.cookies, follow_redirects=False)
+    }, follow_redirects=False)
 
     json_export = client.get(
-        "/w/blue-plate/settings/audit/export.json?audit_action=workspace.token_rotated",
-        cookies=res.cookies)
+        "/w/blue-plate/settings/audit/export.json?audit_action=workspace.token_rotated")
     assert json_export.status_code == 200
     assert json_export.headers["content-type"].startswith("application/json")
     assert "blue-plate-audit.json" in json_export.headers["content-disposition"]
@@ -465,8 +450,7 @@ def test_audit_export_json_and_csv_respect_filters(tmp_path, monkeypatch):
     assert body[0]["details"]["token_tail"]
 
     csv_export = client.get(
-        "/w/blue-plate/settings/audit/export.csv?audit_action=workspace.token_rotated",
-        cookies=res.cookies)
+        "/w/blue-plate/settings/audit/export.csv?audit_action=workspace.token_rotated")
     assert csv_export.status_code == 200
     assert csv_export.headers["content-type"].startswith("text/csv")
     assert "created_at,actor,action,entity_type,entity_id,summary,details_json" in csv_export.text
@@ -481,14 +465,12 @@ def test_support_dashboard_surfaces_operator_state(tmp_path, monkeypatch):
     client.post("/w/blue-plate/settings/members/invite", data={
         "email": "jordan@example.com",
         "role": "admin",
-    }, cookies=res.cookies, follow_redirects=False)
+    }, follow_redirects=False)
     pack = db.one("SELECT * FROM content_packs")
-    client.post(f"/w/blue-plate/packs/{pack['id']}/approve",
-                cookies=res.cookies, follow_redirects=False)
-    client.post(f"/w/blue-plate/packs/{pack['id']}/share",
-                cookies=res.cookies, follow_redirects=False)
+    client.post(f"/w/blue-plate/packs/{pack['id']}/approve", follow_redirects=False)
+    client.post(f"/w/blue-plate/packs/{pack['id']}/share", follow_redirects=False)
 
-    page = client.get("/w/blue-plate/support", cookies=res.cookies)
+    page = client.get("/w/blue-plate/support")
     assert page.status_code == 200
     assert "Support dashboard" in page.text
     assert "Workspace state" in page.text
@@ -511,11 +493,10 @@ def test_audit_detail_renders_event_details_for_owner_only(tmp_path, monkeypatch
     configure_tmp_db(tmp_path, monkeypatch)
     owner = TestClient(app)
     res = signup(owner)
-    owner.post("/w/blue-plate/settings/token",
-               cookies=res.cookies, follow_redirects=False)
+    owner.post("/w/blue-plate/settings/token", follow_redirects=False)
     event = db.one("SELECT * FROM audit_events WHERE action='workspace.token_rotated'")
 
-    page = owner.get(f"/w/blue-plate/settings/audit/events/{event['id']}", cookies=res.cookies)
+    page = owner.get(f"/w/blue-plate/settings/audit/events/{event['id']}")
     assert page.status_code == 200
     assert f"Audit event #{event['id']}" in page.text
     assert "workspace.token_rotated" in page.text
@@ -526,7 +507,7 @@ def test_audit_detail_renders_event_details_for_owner_only(tmp_path, monkeypatch
     owner.post("/w/blue-plate/settings/members/invite", data={
         "email": "casey@example.com",
         "role": "member",
-    }, cookies=res.cookies, follow_redirects=False)
+    }, follow_redirects=False)
     invite = db.one("SELECT * FROM workspace_invites WHERE email='casey@example.com'")
     member_client = TestClient(app)
     accepted = member_client.post(f"/invite/{invite['token']}/accept", data={
@@ -534,8 +515,7 @@ def test_audit_detail_renders_event_details_for_owner_only(tmp_path, monkeypatch
         "password": "correct-horse",
     }, follow_redirects=False)
     forbidden = member_client.get(
-        f"/w/blue-plate/settings/audit/events/{event['id']}",
-        cookies=accepted.cookies)
+        f"/w/blue-plate/settings/audit/events/{event['id']}")
     assert forbidden.status_code == 403
 
 
@@ -543,7 +523,7 @@ def test_billing_page_shows_trial_when_stripe_unconfigured(tmp_path, monkeypatch
     configure_tmp_db(tmp_path, monkeypatch)
     client = TestClient(app)
     res = signup(client)
-    billing = client.get("/w/blue-plate/billing", cookies=res.cookies)
+    billing = client.get("/w/blue-plate/billing")
     assert billing.status_code == 200
     assert "trialing" in billing.text
     assert "Stripe keys" in billing.text
@@ -581,8 +561,7 @@ def test_configured_stripe_checkout_redirects_to_session_url(tmp_path, monkeypat
     monkeypatch.setattr(billing, "_stripe", lambda: FakeStripe)
     client = TestClient(app)
     res = signup(client)
-    checkout = client.post("/w/blue-plate/billing/checkout",
-                           cookies=res.cookies, follow_redirects=False)
+    checkout = client.post("/w/blue-plate/billing/checkout", follow_redirects=False)
     assert checkout.status_code == 303
     assert checkout.headers["location"] == "https://checkout.stripe.test/session"
     event = db.one("SELECT * FROM audit_events WHERE action='billing.checkout_started'")
@@ -706,21 +685,18 @@ def test_pack_share_page_and_exports(tmp_path, monkeypatch):
     configure_tmp_db(tmp_path, monkeypatch)
     client = TestClient(app)
     res = signup(client)
-    cookies = res.cookies
     pack = db.one("SELECT * FROM content_packs")
 
-    approve = client.post(f"/w/blue-plate/packs/{pack['id']}/approve",
-                          cookies=cookies, follow_redirects=False)
+    approve = client.post(f"/w/blue-plate/packs/{pack['id']}/approve", follow_redirects=False)
     assert approve.status_code == 303
     assert db.one("SELECT status FROM content_packs WHERE id=?", (pack["id"],))["status"] == "approved"
 
-    share = client.post(f"/w/blue-plate/packs/{pack['id']}/share",
-                        cookies=cookies, follow_redirects=False)
+    share = client.post(f"/w/blue-plate/packs/{pack['id']}/share", follow_redirects=False)
     assert share.status_code == 303
     assert share.headers["location"] == f"/w/blue-plate?shared={pack['id']}#pack-{pack['id']}"
     token = db.one("SELECT share_token FROM content_packs WHERE id=?", (pack["id"],))["share_token"]
     assert token
-    workspace = client.get(share.headers["location"], cookies=cookies)
+    workspace = client.get(share.headers["location"])
     assert workspace.status_code == 200
     assert "Share link ready" in workspace.text
     assert f"http://localhost:8450/share/{token}" in workspace.text
@@ -758,7 +734,6 @@ def test_latest_pack_api_hides_newer_drafts_by_default(tmp_path, monkeypatch):
     configure_tmp_db(tmp_path, monkeypatch)
     client = TestClient(app)
     res = signup(client)
-    cookies = res.cookies
     first = db.one("SELECT * FROM content_packs")
 
     hidden = client.get(
@@ -768,12 +743,11 @@ def test_latest_pack_api_hides_newer_drafts_by_default(tmp_path, monkeypatch):
     assert hidden.status_code == 200
     assert hidden.json()["pack"] is None
 
-    client.post(f"/w/blue-plate/packs/{first['id']}/approve",
-                cookies=cookies, follow_redirects=False)
+    client.post(f"/w/blue-plate/packs/{first['id']}/approve", follow_redirects=False)
     campaign = db.one("SELECT id FROM campaigns LIMIT 1")
     recipe = db.one("SELECT id FROM content_recipes WHERE slug='menu-launch'")
     client.post(f"/w/blue-plate/campaigns/{campaign['id']}/generate",
-                data={"recipe_id": recipe["id"]}, cookies=cookies,
+                data={"recipe_id": recipe["id"]},
                 follow_redirects=False)
     newest_draft = db.one("SELECT * FROM content_packs ORDER BY id DESC LIMIT 1")
     assert newest_draft["id"] != first["id"]
@@ -809,8 +783,7 @@ def test_mise_packs_api_returns_only_approved_or_exported_by_default(tmp_path, m
     assert hidden.status_code == 200
     assert hidden.json()["packs"] == []
 
-    client.post(f"/w/blue-plate/packs/{pack['id']}/approve",
-                cookies=res.cookies, follow_redirects=False)
+    client.post(f"/w/blue-plate/packs/{pack['id']}/approve", follow_redirects=False)
     shown = client.get(
         "/api/mise/organizations/blue-plate/packs",
         headers={"Authorization": "Bearer mise-test"},
@@ -896,7 +869,7 @@ def test_workspace_surfaces_upgrade_prompt_for_locked_recipe(tmp_path, monkeypat
     configure_tmp_db(tmp_path, monkeypatch)
     client = TestClient(app)
     res = signup(client, plan="restaurant_starter")
-    page = client.get("/w/blue-plate", cookies=res.cookies)
+    page = client.get("/w/blue-plate")
     assert page.status_code == 200
     assert "Unlock Seasonal Press Kit with Restaurant Growth" in page.text
 
@@ -906,14 +879,12 @@ def test_billing_checkout_return_banners(tmp_path, monkeypatch):
     client = TestClient(app)
     res = signup(client)
 
-    success = client.get("/w/blue-plate/billing?checkout=success",
-                         cookies=res.cookies)
+    success = client.get("/w/blue-plate/billing?checkout=success")
     assert success.status_code == 200
     assert "Checkout returned successfully." in success.text
     assert "subscription webhook arrives" in success.text
 
-    cancel = client.get("/w/blue-plate/billing?checkout=cancel",
-                        cookies=res.cookies)
+    cancel = client.get("/w/blue-plate/billing?checkout=cancel")
     assert cancel.status_code == 200
     assert "Checkout was canceled." in cancel.text
     assert "No billing changes were made" in cancel.text
@@ -924,8 +895,7 @@ def test_billing_can_switch_trial_plan(tmp_path, monkeypatch):
     client = TestClient(app)
     res = signup(client, plan="restaurant_starter")
     switch = client.post("/w/blue-plate/billing/plan",
-                         data={"plan": "restaurant_growth"},
-                         cookies=res.cookies, follow_redirects=False)
+                         data={"plan": "restaurant_growth"}, follow_redirects=False)
     assert switch.status_code == 303
     org = db.one("SELECT * FROM organizations WHERE slug='blue-plate'")
     sub = db.one("SELECT * FROM subscriptions WHERE org_id=?", (org["id"],))
