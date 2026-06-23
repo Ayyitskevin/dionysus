@@ -166,6 +166,9 @@ async def construct_webhook_event(request: Request) -> dict:
         raise HTTPException(status_code=503, detail="Stripe webhook is not configured")
     stripe = _stripe()
     try:
-        return stripe.Webhook.construct_event(payload, sig, config.STRIPE_WEBHOOK_SECRET)
+        event = stripe.Webhook.construct_event(payload, sig, config.STRIPE_WEBHOOK_SECRET)
+        if hasattr(event, "to_dict_recursive"):
+            return event.to_dict_recursive()
+        return event
     except Exception as exc:
         raise HTTPException(status_code=400, detail="invalid Stripe webhook") from exc

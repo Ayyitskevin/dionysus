@@ -220,6 +220,46 @@ def test_stripe_webhook_marks_subscription_active(tmp_path, monkeypatch):
 
 
 
+def test_stripe_webhook_accepts_stripe_event_objects(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    from app import billing, config
+    config.STRIPE_WEBHOOK_SECRET = "whsec_test"
+    client = TestClient(app)
+    signup(client)
+    org = db.one("SELECT id FROM organizations WHERE slug='blue-plate'")
+
+    class FakeEvent:
+        def to_dict_recursive(self):
+            return {
+                "type": "checkout.session.completed",
+                "data": {"object": {
+                    "client_reference_id": str(org["id"]),
+                    "customer": "cus_obj",
+                    "subscription": "sub_obj",
+                    "metadata": {"org_id": str(org["id"]), "plan": "restaurant_growth"},
+                }},
+            }
+
+    class FakeWebhook:
+        @staticmethod
+        def construct_event(payload, sig, secret):
+            assert secret == "whsec_test"
+            assert sig == "sig"
+            return FakeEvent()
+
+    class FakeStripe:
+        Webhook = FakeWebhook
+
+    monkeypatch.setattr(billing, "_stripe", lambda: FakeStripe)
+    res = client.post("/stripe/webhook", content=b"{}",
+                      headers={"stripe-signature": "sig"})
+    assert res.status_code == 200
+    sub = db.one("SELECT * FROM subscriptions WHERE org_id=?", (org["id"],))
+    assert sub["status"] == "active"
+    assert sub["stripe_customer_id"] == "cus_obj"
+    assert sub["stripe_subscription_id"] == "sub_obj"
+
+
 def test_readiness_fails_with_default_dev_config(tmp_path, monkeypatch):
     configure_tmp_db(tmp_path, monkeypatch)
     from app import config
