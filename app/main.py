@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import billing, config, db, jobs, packs as pack_utils, plans, readiness, recipes, security
+from . import audit, billing, config, db, jobs, packs as pack_utils, plans, readiness, recipes, security
 from .render import ROOT, templates
 
 logging.basicConfig(level=logging.INFO,
@@ -433,6 +433,7 @@ async def settings_page(request: Request, slug: str):
         "bridge_count": bridge_count,
         "mise_bridge_armed": bool(config.MISE_IMPORT_TOKEN),
         "access_token_tail": org["access_token"][-6:],
+        "audit_events": audit.recent_for_org(org["id"]),
         "notice": notice,
         "rotated": rotated,
         "revoked": revoked,
@@ -444,35 +445,70 @@ async def update_settings(request: Request, slug: str,
                           company: str = Form(""), email: str = Form(...),
                           market: str = Form(""), service_mix: str = Form(""),
                           brand_voice: str = Form("")):
-    org, _, _ = _require_owner(request, slug)
+    org, user, _ = _require_owner(request, slug)
     email = email.strip().lower()
     if "@" not in email or "." not in email.rsplit("@", 1)[-1]:
         raise HTTPException(status_code=400, detail="valid contact email required")
+    updates = {
+        "company": company.strip() or None,
+        "email": email,
+        "market": market.strip() or None,
+        "service_mix": service_mix.strip() or None,
+        "brand_voice": brand_voice.strip() or None,
+    }
+    labels = {
+        "company": "business/studio",
+        "email": "contact email",
+        "market": "market",
+        "service_mix": "service mix",
+        "brand_voice": "brand voice",
+    }
+    changed = [labels[key] for key, value in updates.items() if org[key] != value]
     db.run("""UPDATE organizations
               SET company=?, email=?, market=?, service_mix=?, brand_voice=?
               WHERE id=?""",
-           (company.strip() or None, email, market.strip() or None,
-            service_mix.strip() or None, brand_voice.strip() or None, org["id"]))
+           (updates["company"], updates["email"], updates["market"],
+            updates["service_mix"], updates["brand_voice"], org["id"]))
+    summary = "Updated workspace basics"
+    if changed:
+        summary = f"{summary}: {', '.join(changed)}."
+    else:
+        summary = f"{summary}: no field changes."
+    audit.log_event(
+        org["id"], "workspace.settings_updated",
+        actor_user_id=user["id"], entity_type="organization", entity_id=org["id"],
+        summary=summary, details={"fields": changed})
     return RedirectResponse(f"/w/{slug}/settings?notice=saved", status_code=303)
 
 
 @app.post("/w/{slug}/settings/token")
 async def rotate_access_token(request: Request, slug: str):
-    org, _, _ = _require_owner(request, slug)
+    org, user, _ = _require_owner(request, slug)
+    token = security.new_token()
     db.run("""UPDATE organizations SET access_token=? WHERE id=?""",
-           (security.new_token(), org["id"]))
+           (token, org["id"]))
+    audit.log_event(
+        org["id"], "workspace.token_rotated",
+        actor_user_id=user["id"], entity_type="organization", entity_id=org["id"],
+        summary=f"Rotated workspace token; new token ends in {token[-6:]}.",
+        details={"token_tail": token[-6:]})
     return RedirectResponse(f"/w/{slug}/settings?rotated=1", status_code=303)
 
 
 @app.post("/w/{slug}/settings/packs/{pack_id}/revoke-share")
 async def revoke_pack_share(request: Request, slug: str, pack_id: int):
-    org, _, _ = _require_owner(request, slug)
+    org, user, _ = _require_owner(request, slug)
     pack = pack_utils.get_for_org(pack_id, org["id"])
     if not pack:
         raise HTTPException(status_code=404, detail="pack not found")
     db.run("""UPDATE content_packs
               SET share_token=NULL, updated_at=datetime('now')
               WHERE id=?""", (pack_id,))
+    audit.log_event(
+        org["id"], "pack.share_revoked",
+        actor_user_id=user["id"], entity_type="content_pack", entity_id=pack_id,
+        summary=f"Revoked public share link for {pack['title']}.",
+        details={"pack_title": pack["title"]})
     return RedirectResponse(f"/w/{slug}/settings?revoked={pack_id}", status_code=303)
 
 
@@ -536,22 +572,38 @@ async def generate_pack(request: Request, slug: str, campaign_id: int,
 
 @app.post("/w/{slug}/packs/{pack_id}/approve")
 async def approve_pack(request: Request, slug: str, pack_id: int):
-    org, _ = _require_workspace(request, slug)
+    org, user = _require_workspace(request, slug)
     pack = pack_utils.get_for_org(pack_id, org["id"])
     if not pack:
         raise HTTPException(status_code=404, detail="pack not found")
     db.run("""UPDATE content_packs SET status='approved', approved_at=datetime('now'),
               updated_at=datetime('now') WHERE id=?""", (pack_id,))
+    audit.log_event(
+        org["id"], "pack.approved",
+        actor_user_id=audit.actor_id(user), entity_type="content_pack", entity_id=pack_id,
+        summary=f"Approved pack: {pack['title']}.",
+        details={"pack_title": pack["title"]})
     return RedirectResponse(f"/w/{slug}#pack-{pack_id}", status_code=303)
 
 
 @app.post("/w/{slug}/packs/{pack_id}/share")
 async def share_pack(request: Request, slug: str, pack_id: int):
-    org, _ = _require_workspace(request, slug)
+    org, user = _require_workspace(request, slug)
     pack = pack_utils.get_for_org(pack_id, org["id"])
     if not pack:
         raise HTTPException(status_code=404, detail="pack not found")
-    pack_utils.ensure_share_token(pack_id)
+    had_token = bool(pack["share_token"])
+    token = pack_utils.ensure_share_token(pack_id)
+    verb = "Reused" if had_token else "Created"
+    audit.log_event(
+        org["id"], "pack.share_enabled",
+        actor_user_id=audit.actor_id(user), entity_type="content_pack", entity_id=pack_id,
+        summary=f"{verb} public share link for {pack['title']}.",
+        details={
+            "created": not had_token,
+            "pack_title": pack["title"],
+            "share_token_tail": token[-6:],
+        })
     return RedirectResponse(f"/w/{slug}?shared={pack_id}#pack-{pack_id}", status_code=303)
 
 
@@ -579,11 +631,17 @@ def _export_response(pack, fmt: str):
 
 @app.get("/w/{slug}/packs/{pack_id}/export.{fmt}")
 async def export_pack(request: Request, slug: str, pack_id: int, fmt: str):
-    org, _ = _require_workspace(request, slug)
+    org, user = _require_workspace(request, slug)
     pack = pack_utils.get_for_org(pack_id, org["id"])
     if not pack:
         raise HTTPException(status_code=404, detail="pack not found")
-    return _export_response(pack, fmt)
+    resp = _export_response(pack, fmt)
+    audit.log_event(
+        org["id"], "pack.exported",
+        actor_user_id=audit.actor_id(user), entity_type="content_pack", entity_id=pack_id,
+        summary=f"Exported {pack['title']} as {fmt}.",
+        details={"pack_title": pack["title"], "format": fmt})
+    return resp
 
 
 @app.get("/share/{token}", response_class=HTMLResponse)
@@ -635,12 +693,17 @@ async def billing_page(request: Request, slug: str):
 @app.post("/w/{slug}/billing/plan")
 async def choose_plan(request: Request, slug: str, plan: str = Form(...),
                       checkout: str = Form("")):
-    org, _ = _require_workspace(request, slug)
+    org, user = _require_workspace(request, slug)
     plan = plans.normalize_plan(plan, org["audience"])
     if plans.PLANS[plan]["audience"] != org["audience"]:
         raise HTTPException(status_code=400, detail="plan does not match workspace")
     db.run("UPDATE organizations SET plan=? WHERE id=?", (plan, org["id"]))
     billing.sync_trial_subscription(org["id"], plan)
+    audit.log_event(
+        org["id"], "billing.plan_selected",
+        actor_user_id=audit.actor_id(user), entity_type="subscription", entity_id=org["id"],
+        summary=f"Selected {plans.PLANS[plan]['name']} plan.",
+        details={"plan": plan, "previous_plan": org["plan"]})
     if checkout:
         fresh = _org_by_slug(slug)
         url = billing.create_checkout_session(
@@ -648,18 +711,29 @@ async def choose_plan(request: Request, slug: str, plan: str = Form(...),
             success_url=f"{config.BASE_URL}/w/{slug}/billing?checkout=success",
             cancel_url=f"{config.BASE_URL}/w/{slug}/billing?checkout=cancel",
         )
+        audit.log_event(
+            org["id"], "billing.checkout_started",
+            actor_user_id=audit.actor_id(user), entity_type="subscription", entity_id=org["id"],
+            summary=f"Started Stripe checkout for {plans.PLANS[plan]['name']}.",
+            details={"plan": plan})
         return RedirectResponse(url, status_code=303)
     return RedirectResponse(f"/w/{slug}/billing", status_code=303)
 
 
 @app.post("/w/{slug}/billing/checkout")
 async def start_checkout(request: Request, slug: str):
-    org, _ = _require_workspace(request, slug)
+    org, user = _require_workspace(request, slug)
     url = billing.create_checkout_session(
         org,
         success_url=f"{config.BASE_URL}/w/{slug}/billing?checkout=success",
         cancel_url=f"{config.BASE_URL}/w/{slug}/billing?checkout=cancel",
     )
+    state = billing.checkout_state(org)
+    audit.log_event(
+        org["id"], "billing.checkout_started",
+        actor_user_id=audit.actor_id(user), entity_type="subscription", entity_id=org["id"],
+        summary=f"Started Stripe checkout for {state['plan_meta']['name']}.",
+        details={"plan": state["plan"]})
     return RedirectResponse(url, status_code=303)
 
 

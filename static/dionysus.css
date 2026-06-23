@@ -457,7 +457,34 @@ button:disabled {
   flex-wrap: wrap;
 }
 .settings-actions form { margin: 0; }
+.audit-list {
+  display: grid;
+  gap: 0.75rem;
+}
+.audit-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+}
+.audit-row p {
+  color: var(--muted);
+  margin: 0.25rem 0 0;
+}
+.audit-row span {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.35rem 0.55rem;
+  color: var(--blue);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
 
 @media (max-width: 880px) {
-  .upgrade-strip, .campaign-actions, .campaign-actions form, .settings-grid, .settings-actions { display: grid; min-width: 0; }
+  .upgrade-strip, .campaign-actions, .campaign-actions form, .settings-grid, .settings-actions, .audit-row { display: grid; min-width: 0; }
 }

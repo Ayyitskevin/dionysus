@@ -79,5 +79,25 @@
       {% endfor %}
     </div>
   </section>
+
+  <section class="band settings-band">
+    <h2>Activity trail</h2>
+    <div class="audit-list">
+      {% for event in audit_events %}
+      <article class="audit-row">
+        <div>
+          <strong>{{ event.summary }}</strong>
+          <p>{{ event.actor_label }} · {{ event.created_at }}</p>
+        </div>
+        <span>{{ event.action }}</span>
+      </article>
+      {% else %}
+      <div class="empty-state">
+        <h3>No activity yet</h3>
+        <p>Owner actions and billing state changes will appear here.</p>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
 </section>
 {% endblock %}

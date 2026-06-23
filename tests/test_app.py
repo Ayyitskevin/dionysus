@@ -1,3 +1,4 @@
+import json
 import os
 
 from fastapi.testclient import TestClient
@@ -220,6 +221,16 @@ def test_settings_update_persists_workspace_basics(tmp_path, monkeypatch):
     assert org["market"] == "Charlotte"
     assert org["service_mix"] == "dine-in, catering"
     assert org["brand_voice"] == "polished and local"
+    event = db.one("SELECT * FROM audit_events WHERE action='workspace.settings_updated'")
+    assert event
+    assert event["actor_user_id"]
+    assert "contact email" in event["summary"]
+    assert "brand voice" in event["summary"]
+    assert json.loads(event["details_json"])["fields"]
+    settings = client.get("/w/blue-plate/settings", cookies=res.cookies)
+    assert "Activity trail" in settings.text
+    assert "Updated workspace basics" in settings.text
+    assert "Avery (avery@example.com)" in settings.text
 
 
 def test_settings_rotate_workspace_access_token(tmp_path, monkeypatch):
@@ -233,6 +244,9 @@ def test_settings_rotate_workspace_access_token(tmp_path, monkeypatch):
     assert rotated.headers["location"] == "/w/blue-plate/settings?rotated=1"
     new = db.one("SELECT access_token FROM organizations WHERE slug='blue-plate'")["access_token"]
     assert new != old
+    event = db.one("SELECT * FROM audit_events WHERE action='workspace.token_rotated'")
+    assert event and new[-6:] in event["summary"]
+    assert json.loads(event["details_json"])["token_tail"] == new[-6:]
 
 
 def test_settings_revoke_share_token_removes_public_access(tmp_path, monkeypatch):
@@ -252,6 +266,27 @@ def test_settings_revoke_share_token_removes_public_access(tmp_path, monkeypatch
     assert revoke.headers["location"] == f"/w/blue-plate/settings?revoked={pack['id']}"
     assert db.one("SELECT share_token FROM content_packs WHERE id=?", (pack["id"],))["share_token"] is None
     assert client.get(f"/share/{token}").status_code == 404
+    actions = [row["action"] for row in db.all_(
+        "SELECT action FROM audit_events ORDER BY id")]
+    assert "pack.share_enabled" in actions
+    assert "pack.share_revoked" in actions
+
+
+def test_pack_approve_and_workspace_export_write_audit_events(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    res = signup(client)
+    pack = db.one("SELECT * FROM content_packs")
+    approve = client.post(f"/w/blue-plate/packs/{pack['id']}/approve",
+                          cookies=res.cookies, follow_redirects=False)
+    assert approve.status_code == 303
+    export = client.get(f"/w/blue-plate/packs/{pack['id']}/export.md",
+                        cookies=res.cookies)
+    assert export.status_code == 200
+    actions = [row["action"] for row in db.all_(
+        "SELECT action FROM audit_events ORDER BY id")]
+    assert "pack.approved" in actions
+    assert "pack.exported" in actions
 
 
 def test_billing_page_shows_trial_when_stripe_unconfigured(tmp_path, monkeypatch):
@@ -300,6 +335,8 @@ def test_configured_stripe_checkout_redirects_to_session_url(tmp_path, monkeypat
                            cookies=res.cookies, follow_redirects=False)
     assert checkout.status_code == 303
     assert checkout.headers["location"] == "https://checkout.stripe.test/session"
+    event = db.one("SELECT * FROM audit_events WHERE action='billing.checkout_started'")
+    assert event and "Restaurant Growth" in event["summary"]
 
 
 def test_stripe_webhook_marks_subscription_active(tmp_path, monkeypatch):
@@ -329,7 +366,11 @@ def test_stripe_webhook_marks_subscription_active(tmp_path, monkeypatch):
     assert sub["status"] == "active"
     assert sub["stripe_customer_id"] == "cus_123"
     assert sub["stripe_subscription_id"] == "sub_123"
-
+    event = db.one("SELECT * FROM audit_events WHERE action='billing.checkout_completed'")
+    assert event
+    assert event["actor_user_id"] is None
+    assert "subscription marked active" in event["summary"]
+    assert json.loads(event["details_json"])["status"] == "active"
 
 
 def test_stripe_webhook_accepts_stripe_event_objects(tmp_path, monkeypatch):

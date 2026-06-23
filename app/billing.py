@@ -2,7 +2,7 @@
 
 from fastapi import HTTPException, Request
 
-from . import config, db, plans
+from . import audit, config, db, plans
 
 
 def price_id(plan: str) -> str:
@@ -127,13 +127,19 @@ def handle_event(event: dict) -> dict:
         org_id = _org_id_from(obj)
         if not org_id:
             return {"ok": True, "ignored": "missing org_id"}
+        plan = _plan_from(obj)
         upsert_subscription(
             org_id,
-            plan=_plan_from(obj),
+            plan=plan,
             status="active",
             customer_id=obj.get("customer"),
             subscription_id=obj.get("subscription"),
         )
+        audit.log_event(
+            org_id, "billing.checkout_completed",
+            entity_type="subscription", entity_id=org_id,
+            summary="Stripe checkout completed; subscription marked active.",
+            details={"event_type": typ, "plan": plan, "status": "active"})
         return {"ok": True, "handled": typ}
 
     if typ in {"customer.subscription.created", "customer.subscription.updated",
@@ -146,14 +152,20 @@ def handle_event(event: dict) -> dict:
         if status not in {"trialing", "active", "past_due", "canceled"}:
             status = "past_due"
         period_end = obj.get("current_period_end")
+        plan = _plan_from(obj)
         upsert_subscription(
             org_id,
-            plan=_plan_from(obj),
+            plan=plan,
             status=status,
             customer_id=obj.get("customer"),
             subscription_id=obj.get("id"),
             current_period_end=str(period_end) if period_end else None,
         )
+        audit.log_event(
+            org_id, "billing.subscription_synced",
+            entity_type="subscription", entity_id=org_id,
+            summary=f"Stripe subscription event synced; status is {status}.",
+            details={"event_type": typ, "plan": plan, "status": status})
         return {"ok": True, "handled": typ}
 
     return {"ok": True, "ignored": typ}
