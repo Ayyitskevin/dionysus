@@ -285,6 +285,48 @@ def test_workspace_export_requires_membership(tmp_path, monkeypatch):
 
 
 
+def test_latest_pack_api_hides_newer_drafts_by_default(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    res = signup(client)
+    cookies = res.cookies
+    first = db.one("SELECT * FROM content_packs")
+
+    hidden = client.get(
+        "/api/mise/organizations/blue-plate/latest-pack",
+        headers={"Authorization": "Bearer mise-test"},
+    )
+    assert hidden.status_code == 200
+    assert hidden.json()["pack"] is None
+
+    client.post(f"/w/blue-plate/packs/{first['id']}/approve",
+                cookies=cookies, follow_redirects=False)
+    campaign = db.one("SELECT id FROM campaigns LIMIT 1")
+    recipe = db.one("SELECT id FROM content_recipes WHERE slug='menu-launch'")
+    client.post(f"/w/blue-plate/campaigns/{campaign['id']}/generate",
+                data={"recipe_id": recipe["id"]}, cookies=cookies,
+                follow_redirects=False)
+    newest_draft = db.one("SELECT * FROM content_packs ORDER BY id DESC LIMIT 1")
+    assert newest_draft["id"] != first["id"]
+    assert newest_draft["status"] == "draft"
+
+    latest = client.get(
+        "/api/mise/organizations/blue-plate/latest-pack",
+        headers={"Authorization": "Bearer mise-test"},
+    )
+    assert latest.status_code == 200
+    assert latest.json()["pack"]["id"] == first["id"]
+    assert latest.json()["pack"]["status"] == "approved"
+
+    drafts = client.get(
+        "/api/mise/organizations/blue-plate/latest-pack?include_drafts=true",
+        headers={"Authorization": "Bearer mise-test"},
+    )
+    assert drafts.status_code == 200
+    assert drafts.json()["pack"]["id"] == newest_draft["id"]
+    assert drafts.json()["pack"]["status"] == "draft"
+
+
 def test_mise_packs_api_returns_only_approved_or_exported_by_default(tmp_path, monkeypatch):
     configure_tmp_db(tmp_path, monkeypatch)
     client = TestClient(app)

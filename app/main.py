@@ -493,7 +493,7 @@ async def packs_for_mise(slug: str, include_drafts: bool = False):
                        JOIN campaigns c ON c.id=cp.campaign_id
                        JOIN organizations o ON o.id=cp.org_id
                        WHERE {where}
-                       ORDER BY cp.created_at DESC""", tuple(params))
+                       ORDER BY cp.created_at DESC, cp.id DESC""", tuple(params))
     return {
         "matched": True,
         "org": slug,
@@ -503,17 +503,22 @@ async def packs_for_mise(slug: str, include_drafts: bool = False):
 
 @app.get("/api/mise/organizations/{slug}/latest-pack",
          dependencies=[Depends(security.require_mise_token)])
-async def latest_pack_for_mise(slug: str):
+async def latest_pack_for_mise(slug: str, include_drafts: bool = False):
     org = _org_by_slug(slug)
-    pack = db.one("""SELECT cp.*, cr.slug AS recipe_slug, cr.name AS recipe_name,
-                            c.title AS campaign_title,
-                            o.name AS org_name, o.company, o.audience
-                     FROM content_packs cp
-                     JOIN content_recipes cr ON cr.id=cp.recipe_id
-                     JOIN campaigns c ON c.id=cp.campaign_id
-                     JOIN organizations o ON o.id=cp.org_id
-                     WHERE cp.org_id=? ORDER BY cp.created_at DESC LIMIT 1""",
-                  (org["id"],))
+    where = "cp.org_id=?"
+    params: list = [org["id"]]
+    if not include_drafts:
+        where += " AND cp.status IN ('approved','exported')"
+    pack = db.one(f"""SELECT cp.*, cr.slug AS recipe_slug, cr.name AS recipe_name,
+                             c.title AS campaign_title,
+                             o.name AS org_name, o.company, o.audience
+                      FROM content_packs cp
+                      JOIN content_recipes cr ON cr.id=cp.recipe_id
+                      JOIN campaigns c ON c.id=cp.campaign_id
+                      JOIN organizations o ON o.id=cp.org_id
+                      WHERE {where}
+                      ORDER BY cp.created_at DESC, cp.id DESC LIMIT 1""",
+                  tuple(params))
     if not pack:
         return {"matched": True, "org": slug, "pack": None}
     return {"matched": True, "org": slug, "pack": _pack_api_payload(pack)}
