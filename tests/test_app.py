@@ -1,5 +1,7 @@
 import json
 import os
+import sqlite3
+import stat
 
 from fastapi.testclient import TestClient
 
@@ -793,6 +795,36 @@ def test_cli_seed_demo_creates_approved_pack_for_mise_bridge(tmp_path, monkeypat
     assert len(body["packs"]) == 1
     assert body["packs"][0]["share_url"].startswith("https://platekit.example.com/share/")
 
+
+
+def test_cli_backup_creates_private_verified_snapshot(tmp_path, monkeypatch, capsys):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    signup(client)
+    from app import cli
+
+    destination = tmp_path / "snapshots"
+    assert cli.main(["backup", str(destination)]) == 0
+    output = capsys.readouterr().out
+    assert "backup\t" in output
+    assert "restore_check\tok\tintegrity=ok\tmigrations=5" in output
+
+    snapshots = list(destination.glob("dionysus-*.db"))
+    assert len(snapshots) == 1
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o700
+    assert stat.S_IMODE(snapshots[0].stat().st_mode) == 0o600
+
+    con = sqlite3.connect(snapshots[0])
+    try:
+        assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert con.execute("SELECT slug FROM organizations").fetchone()[0] == "blue-plate"
+        assert con.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0] >= 0
+    finally:
+        con.close()
+
+    assert cli.main(["verify-backup", str(snapshots[0])]) == 0
+    verify_output = capsys.readouterr().out
+    assert "verify\tok\tintegrity=ok\tmigrations=5" in verify_output
 
 
 def test_workspace_surfaces_upgrade_prompt_for_locked_recipe(tmp_path, monkeypatch):

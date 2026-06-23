@@ -28,6 +28,14 @@ Flow env files:
 
 Both are `0600` and contain secrets. Do not commit either file.
 
+Flow verified backup directory:
+
+```text
+/home/kevin-lee/dionysus-backups
+```
+
+Use `ops/backup-restore.md` for backup, verification, and restore steps.
+
 Cloudflare:
 
 - User-owned tunnel: `platekit-dionysus`

@@ -77,6 +77,7 @@ Production starting points:
 
 - `ops/env.example`
 - `ops/dionysus.service`
+- `ops/backup-restore.md`
 
 
 
@@ -96,6 +97,13 @@ python -m app.cli check-production
 
 The gate fails until production secrets, HTTPS base URL, secure cookies, Stripe
 keys, Stripe price IDs, webhook secret, and Mise bridge token are configured.
+
+Create a verified SQLite backup before production deploys and before any restore:
+
+```bash
+python -m app.cli backup ./data/backups
+python -m app.cli verify-backup ./data/backups/<backup>.db
+```
 
 ## Verification
 
