@@ -65,10 +65,12 @@ The readiness command must return zero before routing traffic.
 
 ```bash
 sudo cp ops/dionysus.service /etc/systemd/system/dionysus.service
+sudo cp ops/dionysus-worker.service /etc/systemd/system/dionysus-worker.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now dionysus
+sudo systemctl enable --now dionysus dionysus-worker
 curl -s http://127.0.0.1:8450/healthz
 curl -s http://127.0.0.1:8450/readiness
+systemctl status dionysus-worker --no-pager
 ```
 
 ## 7. Test money path

@@ -6,7 +6,7 @@
     <p class="eyebrow">{{ org.audience }} · {{ subscription.plan_meta.name }} · {{ subscription.status }}</p>
     <h1>{{ org.company or org.name }}</h1>
     <p>{{ org.brand_voice or "Your first pack is ready. Refine the inputs, add one more offer, then generate the next version." }}</p>
-    <p class="muted">Packs this month: {{ pack_used }}{% if pack_limit is not none %}/{{ pack_limit }}{% else %}/unlimited{% endif %}</p>
+    <p class="muted">Packs this month: {{ pack_used }}{% if pack_limit is not none %}/{{ pack_limit }}{% else %}/unlimited{% endif %}{% if pack_reserved %} · {{ pack_reserved }} queued{% endif %}</p>
   </div>
   <div class="head-actions">
     <a class="button" href="#packs">Latest pack</a>
@@ -37,9 +37,9 @@
   </div>
   <div class="usage-card">
     <strong>{{ subscription.plan_meta.name }}</strong>
-    <span>{{ pack_used }}{% if pack_limit is not none %}/{{ pack_limit }}{% else %}/unlimited{% endif %} packs used this month</span>
+    <span>{{ pack_used }}{% if pack_limit is not none %}/{{ pack_limit }}{% else %}/unlimited{% endif %} packs used this month{% if pack_reserved %} · {{ pack_reserved }} queued{% endif %}</span>
     {% if can_manage_workspace %}
-      {% if pack_limit is not none and pack_used >= pack_limit and limit_upgrade_plan %}
+      {% if pack_limit is not none and pack_capacity_used >= pack_limit and limit_upgrade_plan %}
         <a class="button secondary" href="/w/{{ org.slug }}/billing?plan={{ limit_upgrade_plan }}">Upgrade for more packs</a>
       {% else %}
         <a class="small-link" href="/w/{{ org.slug }}/billing">Manage plan</a>
@@ -50,7 +50,7 @@
   </div>
 </section>
 
-{% if pack_limit is not none and pack_used >= pack_limit and limit_upgrade_plan %}
+{% if pack_limit is not none and pack_capacity_used >= pack_limit and limit_upgrade_plan %}
 <section class="upgrade-strip">
   <div>
     <strong>Monthly pack limit reached.</strong>
@@ -162,7 +162,7 @@
               {% endif %}
             {% endfor %}
           </select>
-          <button {% if pack_limit is not none and pack_used >= pack_limit %}disabled title="Monthly pack limit reached"{% endif %}>Generate pack</button>
+          <button {% if pack_limit is not none and pack_capacity_used >= pack_limit %}disabled title="Monthly pack limit reached"{% endif %}>Generate pack</button>
         </form>
         {% for recipe in recipes %}
           {% if recipe.audience in ("both", org.audience) and upgrade_recipes[recipe.id] %}
@@ -202,7 +202,7 @@
   </div>
   <div class="list">
     {% for job in job_rows %}
-    <article class="row {% if job_failed_id == job.id %}shared-now{% endif %}">
+    <article class="row {% if job_focus_id == job.id %}shared-now{% endif %}">
       <div>
         <strong>{{ job.summary }}</strong>
         <p>{{ job.kind }} · {{ job.status }} · attempts {{ job.attempts }}{% if job.error %} · {{ job.error }}{% endif %}</p>

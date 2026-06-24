@@ -1,52 +1,161 @@
-"""SQLite-backed synchronous job facade.
+"""SQLite-backed asynchronous job queue.
 
-The queue shape mirrors Mise so this can become a worker pool without changing the
-product routes. MVP executes immediately for predictable local development.
+Web routes enqueue durable jobs. A CLI worker claims queued jobs and executes
+them outside the request path.
 """
 
 import json
 import logging
+import time
+from typing import Any
 
-from . import argus, db, generator, recipes
+from . import argus, audit, config, db, generator, recipes
 
 log = logging.getLogger("dionysus.jobs")
 
+PACK_JOB_KINDS = ("generate_pack", "regenerate_pack")
+ACTIVE_STATUSES = ("queued", "running")
 
-def enqueue_generate(campaign_id: int, recipe_id: int, *, argus_run_id: int | None = None) -> int:
+
+def enqueue_generate(campaign_id: int, recipe_id: int, *,
+                     argus_run_id: int | None = None) -> int:
     campaign = db.one("SELECT org_id FROM campaigns WHERE id=?", (campaign_id,))
+    if not campaign:
+        raise RuntimeError("campaign missing")
     payload = {
         "campaign_id": campaign_id,
         "recipe_id": recipe_id,
         "argus_run_id": argus_run_id,
     }
-    job_id = db.run("""INSERT INTO jobs (kind, payload, org_id)
-                       VALUES (?,?,?)""",
-                    ("generate_pack", json.dumps(payload),
-                     campaign["org_id"] if campaign else None))
-    execute(job_id)
-    return job_id
+    return db.run("""INSERT INTO jobs (kind, payload, org_id)
+                     VALUES (?,?,?)""",
+                  ("generate_pack", json.dumps(payload), campaign["org_id"]))
 
 
-def enqueue_regenerate(source_pack_id: int, feedback: str) -> int:
+def enqueue_regenerate(source_pack_id: int, feedback: str, *,
+                       actor_user_id: int | None = None) -> int:
     source = db.one("SELECT org_id FROM content_packs WHERE id=?", (source_pack_id,))
     if not source:
         raise RuntimeError("source pack missing")
-    payload = {"source_pack_id": source_pack_id, "feedback": feedback}
-    job_id = db.run("""INSERT INTO jobs
-                       (kind, payload, org_id, source_pack_id)
-                       VALUES (?,?,?,?)""",
-                    ("regenerate_pack", json.dumps(payload),
-                     source["org_id"], source_pack_id))
-    execute(job_id)
-    return job_id
+    payload: dict[str, Any] = {"source_pack_id": source_pack_id, "feedback": feedback}
+    if actor_user_id is not None:
+        payload["actor_user_id"] = actor_user_id
+    return db.run("""INSERT INTO jobs
+                     (kind, payload, org_id, source_pack_id)
+                     VALUES (?,?,?,?)""",
+                  ("regenerate_pack", json.dumps(payload),
+                   source["org_id"], source_pack_id))
 
 
-def execute(job_id: int) -> None:
-    job = db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
-    if not job or job["status"] != "queued":
-        return
-    db.run("UPDATE jobs SET status='running', attempts=attempts+1, updated_at=datetime('now') "
-           "WHERE id=?", (job_id,))
+def execute(job_id: int) -> dict | None:
+    """Claim and execute one queued job by id."""
+    job = _claim(job_id=job_id)
+    if not job:
+        return None
+    return _finish(job)
+
+
+def run_next() -> dict | None:
+    """Claim and execute the oldest queued job."""
+    job = _claim()
+    if not job:
+        return None
+    return _finish(job)
+
+
+def drain(*, limit: int | None = None) -> int:
+    """Process queued jobs until empty or until limit jobs have run."""
+    processed = 0
+    while limit is None or processed < limit:
+        if not run_next():
+            break
+        processed += 1
+    return processed
+
+
+def work(*, poll_seconds: float | None = None, limit: int | None = None) -> int:
+    """Run worker loop. With a limit, drain up to that many jobs and return."""
+    processed = 0
+    poll = config.JOB_WORKER_POLL_SECONDS if poll_seconds is None else poll_seconds
+    while True:
+        requeue_stale_running()
+        job = run_next()
+        if job:
+            processed += 1
+            if limit is not None and processed >= limit:
+                return processed
+            continue
+        if limit is not None:
+            return processed
+        time.sleep(max(poll, 0.1))
+
+
+def requeue_stale_running(timeout_seconds: int | None = None) -> int:
+    timeout = config.JOB_STALE_SECONDS if timeout_seconds is None else timeout_seconds
+    if timeout <= 0:
+        return 0
+    con = db.connect()
+    try:
+        cur = con.execute("""UPDATE jobs
+                             SET status='queued',
+                                 error='worker lease expired before completion',
+                                 updated_at=datetime('now')
+                             WHERE status='running'
+                               AND datetime(COALESCE(updated_at, created_at))
+                                   < datetime('now', ?)""",
+                          (f"-{int(timeout)} seconds",))
+        con.commit()
+        if cur.rowcount:
+            log.warning("requeued %s stale running jobs", cur.rowcount)
+        return cur.rowcount
+    finally:
+        con.close()
+
+
+def retry(job_id: int) -> None:
+    with db.tx() as con:
+        job = con.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+        if not job:
+            raise RuntimeError("job not found")
+        if job["status"] != "failed":
+            raise RuntimeError("only failed jobs can be retried")
+        con.execute("""UPDATE jobs
+                       SET status='queued', error=NULL, result_pack_id=NULL,
+                           completed_at=NULL, updated_at=datetime('now')
+                       WHERE id=?""", (job_id,))
+
+
+def _claim(*, job_id: int | None = None):
+    con = db.connect()
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        if job_id is None:
+            job = con.execute("""SELECT * FROM jobs
+                                 WHERE status='queued'
+                                 ORDER BY created_at, id
+                                 LIMIT 1""").fetchone()
+        else:
+            job = con.execute("""SELECT * FROM jobs
+                                 WHERE id=? AND status='queued'""",
+                              (job_id,)).fetchone()
+        if not job:
+            con.commit()
+            return None
+        con.execute("""UPDATE jobs
+                       SET status='running', attempts=attempts+1,
+                           updated_at=datetime('now')
+                       WHERE id=? AND status='queued'""", (job["id"],))
+        claimed = con.execute("SELECT * FROM jobs WHERE id=?", (job["id"],)).fetchone()
+        con.commit()
+        return claimed
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+
+
+def _finish(job) -> dict | None:
     try:
         payload = json.loads(job["payload"])
         if job["kind"] == "generate_pack":
@@ -58,12 +167,13 @@ def execute(job_id: int) -> None:
         db.run("""UPDATE jobs
                   SET status='done', result_pack_id=?, error=NULL,
                       completed_at=datetime('now'), updated_at=datetime('now')
-                  WHERE id=?""", (result_pack_id, job_id))
+                  WHERE id=?""", (result_pack_id, job["id"]))
     except Exception as exc:
         db.run("""UPDATE jobs
                   SET status='failed', error=?, updated_at=datetime('now')
-                  WHERE id=?""", (str(exc)[:500], job_id))
-        log.exception("job %s failed", job_id)
+                  WHERE id=?""", (str(exc)[:500], job["id"]))
+        log.exception("job %s failed", job["id"])
+    return get(job["id"])
 
 
 def _execute_generate(payload: dict) -> int:
@@ -114,19 +224,19 @@ def _execute_regenerate(payload: dict) -> int:
                           (org["id"], source["campaign_id"], source["recipe_id"],
                            regenerated["headline"], json.dumps(regenerated),
                            engine, json.dumps(regenerated), source["id"], feedback))
-        return cur.lastrowid
-
-
-def retry(job_id: int) -> None:
-    job = db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
-    if not job:
-        raise RuntimeError("job not found")
-    if job["status"] != "failed":
-        raise RuntimeError("only failed jobs can be retried")
-    db.run("""UPDATE jobs
-              SET status='queued', error=NULL, updated_at=datetime('now')
-              WHERE id=?""", (job_id,))
-    execute(job_id)
+        result_pack_id = cur.lastrowid
+    audit.log_event(
+        org["id"], "pack.regenerated",
+        actor_user_id=payload.get("actor_user_id"), entity_type="content_pack",
+        entity_id=result_pack_id,
+        summary=f"Regenerated {source['title']} into a new draft.",
+        details={
+            "source_pack_id": source["id"],
+            "source_status": source["status"],
+            "pack_title": regenerated["headline"],
+            "feedback": feedback,
+        })
+    return result_pack_id
 
 
 def _job(row) -> dict:
@@ -143,6 +253,16 @@ def _job(row) -> dict:
     else:
         job["summary"] = job["kind"]
     return job
+
+
+def get(job_id: int) -> dict | None:
+    row = db.one("""SELECT j.*, sp.title AS source_pack_title,
+                           rp.title AS result_pack_title
+                    FROM jobs j
+                    LEFT JOIN content_packs sp ON sp.id=j.source_pack_id
+                    LEFT JOIN content_packs rp ON rp.id=j.result_pack_id
+                    WHERE j.id=?""", (job_id,))
+    return _job(row) if row else None
 
 
 def get_for_org(job_id: int, org_id: int) -> dict | None:
@@ -188,7 +308,17 @@ def pending_count(org_id: int | None = None) -> int:
     return row["n"] if row else 0
 
 
-def failed_count(org_id: int) -> int:
-    row = db.one("SELECT COUNT(*) AS n FROM jobs WHERE org_id=? AND status='failed'",
-                 (org_id,))
+def pending_pack_count(org_id: int) -> int:
+    row = db.one("""SELECT COUNT(*) AS n FROM jobs
+                    WHERE org_id=? AND kind IN ('generate_pack','regenerate_pack')
+                      AND status IN ('queued','running')""", (org_id,))
+    return row["n"] if row else 0
+
+
+def failed_count(org_id: int | None = None) -> int:
+    if org_id is None:
+        row = db.one("SELECT COUNT(*) AS n FROM jobs WHERE status='failed'")
+    else:
+        row = db.one("SELECT COUNT(*) AS n FROM jobs WHERE org_id=? AND status='failed'",
+                     (org_id,))
     return row["n"] if row else 0

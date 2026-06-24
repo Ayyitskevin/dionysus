@@ -425,7 +425,8 @@ def _enforce_monthly_pack_limit(org, sub: dict | None = None) -> None:
     used = db.one("""SELECT COUNT(*) AS n FROM content_packs
                      WHERE org_id=? AND substr(created_at,1,7)=?""",
                   (org["id"], period))["n"]
-    if used >= limit:
+    reserved = jobs.pending_pack_count(org["id"])
+    if used + reserved >= limit:
         raise HTTPException(status_code=402, detail="monthly pack limit reached")
 
 
@@ -519,9 +520,11 @@ async def signup(request: Request, name: str = Form(...), email: str = Form(...)
         campaign_id = cur.lastrowid
     billing.sync_trial_subscription(org_id, plan)
     recipe = db.one("SELECT id FROM content_recipes WHERE slug=?", (recipe_slug,))
+    job_id = None
     if recipe:
-        jobs.enqueue_generate(campaign_id, recipe["id"])
-    resp = RedirectResponse(f"/w/{slug}#packs", status_code=303)
+        job_id = jobs.enqueue_generate(campaign_id, recipe["id"])
+    location = f"/w/{slug}?job={job_id}#jobs" if job_id else f"/w/{slug}#packs"
+    resp = RedirectResponse(location, status_code=303)
     return _set_auth_cookies(resp, user_id, slug)
 
 
@@ -558,11 +561,12 @@ async def workspace(request: Request, slug: str):
         regenerated_pack_id = int(regenerated_pack_raw)
     except ValueError:
         regenerated_pack_id = 0
-    job_failed_raw = request.query_params.get("job_failed", "")
+    job_focus_raw = request.query_params.get(
+        "job", request.query_params.get("job_failed", ""))
     try:
-        job_failed_id = int(job_failed_raw)
+        job_focus_id = int(job_focus_raw)
     except ValueError:
-        job_failed_id = 0
+        job_focus_id = 0
     archived_count = db.one("""SELECT COUNT(*) AS n FROM content_packs
                               WHERE org_id=? AND archived_at IS NOT NULL""",
                             (org["id"],))["n"]
@@ -580,11 +584,14 @@ async def workspace(request: Request, slug: str):
         r["id"]: plans.upgrade_plan_for_recipe(org["audience"], sub["plan"], r["slug"])
         for r in active_recipes
     }
+    pack_reserved = jobs.pending_pack_count(org["id"])
+    pack_capacity_used = used + pack_reserved
     limit_upgrade_plan = plans.upgrade_plan_for_limit(org["audience"], sub["plan"])
     return templates.TemplateResponse(request, "workspace.html", {
         "org": org, "user": user, "menu": menu, "campaigns": campaigns,
         "packs": packs, "latest_pack": latest_pack, "recipes": active_recipes,
         "subscription": sub, "pack_limit": limit, "pack_used": used,
+        "pack_reserved": pack_reserved, "pack_capacity_used": pack_capacity_used,
         "show_archived": show_archived, "archived_count": archived_count,
         "limit_upgrade_plan": limit_upgrade_plan,
         "upgrade_recipes": upgrade_recipes,
@@ -597,7 +604,7 @@ async def workspace(request: Request, slug: str):
         "job_rows": jobs.actionable_for_org(org["id"]),
         "shared_pack_id": shared_pack_id,
         "regenerated_pack_id": regenerated_pack_id,
-        "job_failed_id": job_failed_id,
+        "job_focus_id": job_focus_id,
         "can_manage_workspace": can_manage_workspace,
     })
 
@@ -1006,8 +1013,8 @@ async def generate_pack(request: Request, slug: str, campaign_id: int,
     if not plans.allowed_recipe(sub["plan"], recipe["slug"]):
         raise HTTPException(status_code=402, detail="upgrade required for this recipe")
     _enforce_monthly_pack_limit(org, sub=sub)
-    jobs.enqueue_generate(campaign_id, recipe_id, argus_run_id=argus_run_id)
-    return RedirectResponse(f"/w/{slug}#packs", status_code=303)
+    job_id = jobs.enqueue_generate(campaign_id, recipe_id, argus_run_id=argus_run_id)
+    return RedirectResponse(f"/w/{slug}?job={job_id}#jobs", status_code=303)
 
 
 def _revision_lines(raw: str) -> list[str]:
@@ -1091,25 +1098,9 @@ async def regenerate_pack(request: Request, slug: str, pack_id: int,
     if not plans.allowed_recipe(sub["plan"], pack["recipe_slug"]):
         raise HTTPException(status_code=402, detail="upgrade required for this recipe")
     _enforce_monthly_pack_limit(org, sub=sub)
-    job_id = jobs.enqueue_regenerate(pack["id"], feedback)
-    job = jobs.get_for_org(job_id, org["id"])
-    if job and job["status"] == "done" and job["result_pack_id"]:
-        audit.log_event(
-            org["id"], "pack.regenerated",
-            actor_user_id=audit.actor_id(user), entity_type="content_pack",
-            entity_id=job["result_pack_id"],
-            summary=f"Regenerated {pack['title']} into a new draft.",
-            details={
-                "job_id": job_id,
-                "source_pack_id": pack["id"],
-                "source_status": pack["status"],
-                "pack_title": job["result_pack_title"],
-                "feedback": feedback,
-            })
-        return RedirectResponse(
-            f"/w/{slug}?regenerated={job['result_pack_id']}#pack-{job['result_pack_id']}",
-            status_code=303)
-    return RedirectResponse(f"/w/{slug}?job_failed={job_id}#jobs", status_code=303)
+    job_id = jobs.enqueue_regenerate(
+        pack["id"], feedback, actor_user_id=audit.actor_id(user))
+    return RedirectResponse(f"/w/{slug}?job={job_id}#jobs", status_code=303)
 
 
 @app.post("/w/{slug}/jobs/{job_id}/retry")
@@ -1132,11 +1123,7 @@ async def retry_job(request: Request, slug: str, job_id: int):
             "status": refreshed["status"],
             "result_pack_id": refreshed["result_pack_id"],
         })
-    if refreshed["status"] == "done" and refreshed["result_pack_id"]:
-        return RedirectResponse(
-            f"/w/{slug}?regenerated={refreshed['result_pack_id']}#pack-{refreshed['result_pack_id']}",
-            status_code=303)
-    return RedirectResponse(f"/w/{slug}?job_failed={job_id}#jobs", status_code=303)
+    return RedirectResponse(f"/w/{slug}?job={job_id}#jobs", status_code=303)
 
 
 @app.post("/w/{slug}/packs/{pack_id}/archive")

@@ -3,18 +3,20 @@
 from pathlib import Path
 import sys
 
-from . import backups, db, seed
+from . import backups, config, db, jobs, seed
 from .readiness import summary
 
 
 USAGE = (
     "usage: python -m app.cli "
-    "[backup [destination-dir]|check-production|migrate|seed-demo|verify-backup <db>]"
+    "[backup [destination-dir]|check-production|migrate|seed-demo|"
+    "verify-backup <db>|worker [--once|--limit N|--poll SECONDS]]"
 )
 
 
 def main(argv: list[str] | None = None) -> int:
-    argv = argv or sys.argv[1:]
+    if argv is None:
+        argv = sys.argv[1:]
     if not argv:
         print(USAGE)
         return 2
@@ -46,6 +48,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{mark}\t{item['key']}\t{item['detail']}")
         return 0 if report["ready"] else 1
 
+    if command == "worker":
+        return _worker(argv[1:])
+
     if command == "backup":
         if len(argv) > 2:
             print(USAGE)
@@ -74,6 +79,52 @@ def main(argv: list[str] | None = None) -> int:
 
     print(USAGE)
     return 2
+
+
+def _worker(argv: list[str]) -> int:
+    poll = config.JOB_WORKER_POLL_SECONDS
+    limit: int | None = None
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--once":
+            limit = 1
+            i += 1
+            continue
+        if arg == "--limit" and i + 1 < len(argv):
+            try:
+                limit = int(argv[i + 1])
+            except ValueError:
+                print(USAGE)
+                return 2
+            if limit < 1:
+                print(USAGE)
+                return 2
+            i += 2
+            continue
+        if arg == "--poll" and i + 1 < len(argv):
+            try:
+                poll = float(argv[i + 1])
+            except ValueError:
+                print(USAGE)
+                return 2
+            i += 2
+            continue
+        print(USAGE)
+        return 2
+
+    db.migrate()
+    if limit is None:
+        print(f"worker\tstarted\tpoll={poll}", flush=True)
+        jobs.work(poll_seconds=poll)
+        return 0
+
+    processed = jobs.work(poll_seconds=poll, limit=limit)
+    print(
+        f"worker\tprocessed={processed}\tpending={jobs.pending_count()}"
+        f"\tfailed={jobs.failed_count()}"
+    )
+    return 0
 
 
 def _print_verification(label: str, result: backups.VerificationResult) -> None:

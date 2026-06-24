@@ -81,6 +81,7 @@ Production starting points:
 
 - `ops/env.example`
 - `ops/dionysus.service`
+- `ops/dionysus-worker.service`
 - `ops/backup-restore.md`
 
 
@@ -92,6 +93,7 @@ Use the deployment runbook before putting a domain in front of the app:
 - `ops/deploy.md`
 - `ops/env.example`
 - `ops/dionysus.service`
+- `ops/dionysus-worker.service`
 
 The app exposes `/readiness` and a CLI gate:
 
@@ -101,6 +103,12 @@ python -m app.cli check-production
 
 The gate fails until production secrets, HTTPS base URL, secure cookies, Stripe
 keys, Stripe price IDs, webhook secret, and Mise bridge token are configured.
+Run the queue worker separately from the web process:
+
+```bash
+python -m app.cli worker
+python -m app.cli worker --once  # process one queued job and exit
+```
 
 Create a verified SQLite backup before production deploys and before any restore:
 

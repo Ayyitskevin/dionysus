@@ -38,7 +38,7 @@ def generate_from_argus(
     gallery_title: str | None = None,
     recipe_slug: str | None = None,
 ) -> dict:
-    """Create a campaign + draft pack enriched from one Argus run."""
+    """Create a campaign and queue a draft pack enriched from one Argus run."""
     slug = recipe_slug or default_recipe_slug(org)
     recipe = db.one("SELECT * FROM content_recipes WHERE slug=? AND active=1", (slug,))
     if not recipe:
@@ -59,19 +59,15 @@ def generate_from_argus(
         (org["id"], title, "Turn this shoot into reusable marketing", "draft"),
     )
     job_id = jobs.enqueue_generate(campaign_id, recipe["id"], argus_run_id=argus_run_id)
-    pack = db.one(
-        """SELECT id, title, body_json FROM content_packs
-           WHERE campaign_id=? ORDER BY id DESC LIMIT 1""",
-        (campaign_id,),
-    )
     log.info(
-        "mise argus hook org=%s gallery=%s run=%s -> campaign=%s pack=%s",
-        org["slug"], mise_gallery_id, argus_run_id, campaign_id, pack["id"] if pack else None,
+        "mise argus hook org=%s gallery=%s run=%s -> campaign=%s job=%s",
+        org["slug"], mise_gallery_id, argus_run_id, campaign_id, job_id,
     )
     return {
         "campaign_id": campaign_id,
         "recipe_slug": recipe["slug"],
         "job_id": job_id,
-        "pack_id": pack["id"] if pack else None,
-        "pack_title": pack["title"] if pack else None,
+        "job_status": "queued",
+        "pack_id": None,
+        "pack_title": None,
     }

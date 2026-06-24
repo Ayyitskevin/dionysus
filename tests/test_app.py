@@ -9,7 +9,7 @@ os.environ["DIONYSUS_DATA_DIR"] = "/tmp/dionysus-test-data"
 os.environ["DIONYSUS_SECRET_KEY"] = "test-secret"
 os.environ["DIONYSUS_MISE_IMPORT_TOKEN"] = "mise-test"
 
-from app import db, generator, security  # noqa: E402
+from app import db, generator, jobs, security  # noqa: E402
 from app.main import app  # noqa: E402
 
 
@@ -28,7 +28,7 @@ def configure_tmp_db(tmp_path, monkeypatch):
     db.migrate()
 
 
-def signup(client, **overrides):
+def signup(client, *, drain=True, **overrides):
     data = {
         "name": "Avery",
         "email": "avery@example.com",
@@ -45,7 +45,10 @@ def signup(client, **overrides):
         "launch_date": "2026-07-01",
     }
     data.update(overrides)
-    return client.post("/signup", data=data, follow_redirects=False)
+    res = client.post("/signup", data=data, follow_redirects=False)
+    if drain:
+        jobs.drain()
+    return res
 
 
 def test_home_prefills_signup_from_query_params(tmp_path, monkeypatch):
@@ -80,7 +83,8 @@ def test_signup_workspace_generate_pack(tmp_path, monkeypatch):
     client = TestClient(app)
     res = signup(client)
     assert res.status_code == 303
-    assert res.headers["location"] == "/w/blue-plate#packs"
+    assert res.headers["location"].startswith("/w/blue-plate?job=")
+    assert res.headers["location"].endswith("#jobs")
 
     assert client.get("/w/blue-plate").status_code == 200
     assert db.one("SELECT role FROM organization_members")["role"] == "owner"
@@ -96,6 +100,32 @@ def test_signup_workspace_generate_pack(tmp_path, monkeypatch):
     pack = db.one("SELECT * FROM content_packs")
     assert pack and "Spring agnolotti" in pack["body_json"]
     assert "fill weekday reservations" in pack["body_json"]
+
+
+def test_signup_queues_initial_pack_until_worker_drains(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+
+    client = TestClient(app)
+    res = signup(client, drain=False)
+    assert res.status_code == 303
+    job = db.one("SELECT * FROM jobs WHERE kind='generate_pack'")
+    assert res.headers["location"] == f"/w/blue-plate?job={job['id']}#jobs"
+    assert job["status"] == "queued"
+    assert job["attempts"] == 0
+    assert db.one("SELECT COUNT(*) AS n FROM content_packs")["n"] == 0
+
+    page = client.get(res.headers["location"])
+    assert page.status_code == 200
+    assert "Generation jobs" in page.text
+    assert "queued" in page.text
+
+    assert jobs.drain(limit=1) == 1
+    done = db.one("SELECT * FROM jobs WHERE id=?", (job["id"],))
+    pack = db.one("SELECT * FROM content_packs")
+    assert done["status"] == "done"
+    assert done["attempts"] == 1
+    assert done["result_pack_id"] == pack["id"]
+    assert "Spring agnolotti" in pack["body_json"]
 
 
 def test_auth_cookies_use_secure_flag_when_configured(tmp_path, monkeypatch):
@@ -373,6 +403,7 @@ def test_plain_members_can_draft_but_not_publish_packs(tmp_path, monkeypatch):
         data={"recipe_id": recipe["id"]},
         follow_redirects=False,
     )
+    jobs.drain()
     pack = db.one("SELECT * FROM content_packs ORDER BY id DESC LIMIT 1")
     page = member_client.get("/w/blue-plate")
     approve = member_client.post(
@@ -507,12 +538,15 @@ def test_owner_can_regenerate_feedback_draft_without_mutating_source(tmp_path, m
         },
         follow_redirects=False,
     )
-    new_pack = db.one("SELECT * FROM content_packs WHERE id!=? ORDER BY id DESC LIMIT 1",
-                      (pack["id"],))
+    job = db.one("SELECT * FROM jobs WHERE kind='regenerate_pack' ORDER BY id DESC LIMIT 1")
     assert regenerated.status_code == 303
-    assert regenerated.headers["location"] == (
-        f"/w/blue-plate?regenerated={new_pack['id']}#pack-{new_pack['id']}"
-    )
+    assert regenerated.headers["location"] == f"/w/blue-plate?job={job['id']}#jobs"
+    assert job["status"] == "queued"
+    assert db.one("SELECT COUNT(*) AS n FROM content_packs")["n"] == 1
+
+    assert jobs.drain(limit=1) == 1
+    done = db.one("SELECT * FROM jobs WHERE id=?", (job["id"],))
+    new_pack = db.one("SELECT * FROM content_packs WHERE id=?", (done["result_pack_id"],))
 
     source_after = db.one("SELECT * FROM content_packs WHERE id=?", (pack["id"],))
     body = json.loads(new_pack["body_json"])
@@ -626,13 +660,19 @@ def test_failed_regeneration_job_can_retry_without_duplicate_pack(tmp_path, monk
     )
     job = db.one("SELECT * FROM jobs WHERE kind='regenerate_pack' ORDER BY id DESC LIMIT 1")
     assert failed.status_code == 303
-    assert failed.headers["location"] == f"/w/blue-plate?job_failed={job['id']}#jobs"
+    assert failed.headers["location"] == f"/w/blue-plate?job={job['id']}#jobs"
+    assert job["status"] == "queued"
+    assert job["attempts"] == 0
+    assert db.one("SELECT COUNT(*) AS n FROM content_packs")["n"] == 1
+
+    assert jobs.drain(limit=1) == 1
+    job = db.one("SELECT * FROM jobs WHERE id=?", (job["id"],))
     assert job["status"] == "failed"
     assert job["attempts"] == 1
     assert "model unavailable" in job["error"]
     assert db.one("SELECT COUNT(*) AS n FROM content_packs")["n"] == 1
 
-    page = client.get(f"/w/blue-plate?job_failed={job['id']}#jobs")
+    page = client.get(f"/w/blue-plate?job={job['id']}#jobs")
     assert "Generation jobs" in page.text
     assert "model unavailable" in page.text
     assert f'/w/blue-plate/jobs/{job["id"]}/retry' in page.text
@@ -643,23 +683,28 @@ def test_failed_regeneration_job_can_retry_without_duplicate_pack(tmp_path, monk
     assert "1 failed jobs" in support.text
 
     retry_failed = client.post(f"/w/blue-plate/jobs/{job['id']}/retry", follow_redirects=False)
-    still_failed = db.one("SELECT * FROM jobs WHERE id=?", (job["id"],))
+    requeued = db.one("SELECT * FROM jobs WHERE id=?", (job["id"],))
     assert retry_failed.status_code == 303
-    assert retry_failed.headers["location"] == f"/w/blue-plate?job_failed={job['id']}#jobs"
+    assert retry_failed.headers["location"] == f"/w/blue-plate?job={job['id']}#jobs"
+    assert requeued["status"] == "queued"
+    assert requeued["attempts"] == 1
+    assert jobs.drain(limit=1) == 1
+    still_failed = db.one("SELECT * FROM jobs WHERE id=?", (job["id"],))
     assert still_failed["status"] == "failed"
     assert still_failed["attempts"] == 2
     assert db.one("SELECT COUNT(*) AS n FROM content_packs")["n"] == 1
 
     monkeypatch.setattr(generator, "regenerate_with_feedback", original_regenerate)
     retry_success = client.post(f"/w/blue-plate/jobs/{job['id']}/retry", follow_redirects=False)
-    done = db.one("SELECT * FROM jobs WHERE id=?", (job["id"],))
+    queued = db.one("SELECT * FROM jobs WHERE id=?", (job["id"],))
     assert retry_success.status_code == 303
+    assert retry_success.headers["location"] == f"/w/blue-plate?job={job['id']}#jobs"
+    assert queued["status"] == "queued"
+    assert jobs.drain(limit=1) == 1
+    done = db.one("SELECT * FROM jobs WHERE id=?", (job["id"],))
     assert done["status"] == "done"
     assert done["attempts"] == 3
     assert done["result_pack_id"]
-    assert retry_success.headers["location"] == (
-        f"/w/blue-plate?regenerated={done['result_pack_id']}#pack-{done['result_pack_id']}"
-    )
     assert db.one("SELECT COUNT(*) AS n FROM content_packs")["n"] == 2
     new_pack = db.one("SELECT * FROM content_packs WHERE id=?", (done["result_pack_id"],))
     assert new_pack["source_pack_id"] == pack["id"]
@@ -681,12 +726,16 @@ def test_feedback_regeneration_respects_monthly_pack_limit(tmp_path, monkeypatch
         )
         assert res.status_code == 303
 
+    org = db.one("SELECT * FROM organizations WHERE slug='blue-plate'")
+    assert jobs.pending_pack_count(org["id"]) == 2
     blocked = client.post(
         f"/w/blue-plate/packs/{pack['id']}/regenerate",
         data={"feedback": "Make it delivery focused."},
         follow_redirects=False,
     )
     assert blocked.status_code == 402
+    assert db.one("SELECT COUNT(*) AS n FROM content_packs")["n"] == 1
+    assert jobs.drain(limit=2) == 2
     assert db.one("SELECT COUNT(*) AS n FROM content_packs")["n"] == 3
 
 
@@ -1154,6 +1203,7 @@ def test_latest_pack_api_hides_newer_drafts_by_default(tmp_path, monkeypatch):
     client.post(f"/w/blue-plate/campaigns/{campaign['id']}/generate",
                 data={"recipe_id": recipe["id"]},
                 follow_redirects=False)
+    jobs.drain()
     newest_draft = db.one("SELECT * FROM content_packs ORDER BY id DESC LIMIT 1")
     assert newest_draft["id"] != first["id"]
     assert newest_draft["status"] == "draft"
@@ -1256,6 +1306,22 @@ def test_cli_seed_demo_creates_approved_pack_for_mise_bridge(tmp_path, monkeypat
     assert len(body["packs"]) == 1
     assert body["packs"][0]["share_url"].startswith("https://platekit.example.com/share/")
 
+
+
+
+def test_cli_worker_once_processes_queued_signup_job(tmp_path, monkeypatch, capsys):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    signup(client, drain=False)
+    from app import cli
+
+    assert cli.main(["worker", "--once"]) == 0
+    output = capsys.readouterr().out
+    assert "worker\tprocessed=1\tpending=0\tfailed=0" in output
+    job = db.one("SELECT * FROM jobs WHERE kind='generate_pack'")
+    assert job["status"] == "done"
+    assert job["result_pack_id"]
+    assert db.one("SELECT COUNT(*) AS n FROM content_packs")["n"] == 1
 
 
 def test_cli_backup_creates_private_verified_snapshot(tmp_path, monkeypatch, capsys):

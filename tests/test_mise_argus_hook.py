@@ -4,7 +4,7 @@ import json
 
 from fastapi.testclient import TestClient
 
-from app import argus, db
+from app import argus, db, jobs
 from app.main import app
 from tests.test_app import configure_tmp_db, signup
 
@@ -44,10 +44,16 @@ def test_argus_pack_hook_creates_keyword_enriched_draft(tmp_path, monkeypatch):
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["ok"] is True
-    assert body["pack_id"]
+    assert body["pack_id"] is None
+    assert body["job_id"]
+    assert body["job_status"] == "queued"
     assert body["recipe_slug"] == "monthly-retainer"
 
-    pack = db.one("SELECT * FROM content_packs WHERE id=?", (body["pack_id"],))
+    job = db.one("SELECT * FROM jobs WHERE id=?", (body["job_id"],))
+    assert job["status"] == "queued"
+    assert jobs.drain(limit=1) == 1
+    done = db.one("SELECT * FROM jobs WHERE id=?", (body["job_id"],))
+    pack = db.one("SELECT * FROM content_packs WHERE id=?", (done["result_pack_id"],))
     data = json.loads(pack["body_json"])
     assert data["provenance"]["engine"] == "dionysus-argus-enriched"
     assert data["provenance"]["argus_run_id"] == 42

@@ -106,7 +106,8 @@ def seed_demo_workspace() -> dict:
                      ORDER BY created_at DESC LIMIT 1""",
                   (org_id, campaign_id))
     if not pack:
-        jobs.enqueue_generate(campaign_id, recipe["id"])
+        job_id = jobs.enqueue_generate(campaign_id, recipe["id"])
+        jobs.execute(job_id)
         pack = db.one("""SELECT * FROM content_packs
                          WHERE org_id=? AND campaign_id=?
                          ORDER BY created_at DESC LIMIT 1""",
