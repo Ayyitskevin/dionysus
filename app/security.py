@@ -61,11 +61,6 @@ def user_id_from_request(request: Request) -> int | None:
         return None
 
 
-def has_workspace_access(request: Request, slug: str) -> bool:
-    raw = request.cookies.get(WORKSPACE_COOKIE)
-    return bool(raw) and unsign(raw) == f"workspace:{slug}"
-
-
 def hash_password(password: str) -> str:
     salt = os.urandom(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 210_000)

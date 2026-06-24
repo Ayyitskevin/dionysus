@@ -285,11 +285,9 @@ def _membership(user_id: int, org_id: int):
 def _require_workspace(request: Request, slug: str):
     org = _org_by_slug(slug)
     user = _current_user(request)
-    if user:
-        if _membership(user["id"], org["id"]):
-            return org, user
+    if not user:
         raise HTTPException(status_code=403, detail="workspace access required")
-    if security.has_workspace_access(request, slug):
+    if _membership(user["id"], org["id"]):
         return org, user
     raise HTTPException(status_code=403, detail="workspace access required")
 
