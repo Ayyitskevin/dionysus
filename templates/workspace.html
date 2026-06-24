@@ -205,10 +205,13 @@
     <article class="row {% if job_focus_id == job.id %}shared-now{% endif %}">
       <div>
         <strong>{{ job.summary }}</strong>
-        <p>{{ job.kind }} · {{ job.status }} · attempts {{ job.attempts }}{% if job.error %} · {{ job.error }}{% endif %}</p>
+        <p>{{ job.kind }} · {{ job.status }} · attempts {{ job.attempts }}{% if job.result_pack_title %} · result {{ job.result_pack_title }}{% endif %}{% if job.error %} · {{ job.error }}{% endif %}</p>
       </div>
       <div class="pack-actions">
         <span class="status-pill {{ job.status }}">{{ job.status }}</span>
+        {% if job.result_pack_id %}
+        <a class="button ghost" href="/w/{{ org.slug }}?result={{ job.result_pack_id }}#pack-{{ job.result_pack_id }}">Open result</a>
+        {% endif %}
         {% if can_manage_workspace and job.status == "failed" %}
         <form method="post" action="/w/{{ org.slug }}/jobs/{{ job.id }}/retry"><button class="secondary">Retry</button></form>
         {% endif %}
@@ -233,7 +236,7 @@
   {% for pack in packs %}
     {% set body = pack_json[pack.id] %}
     {% set share_url = pack_share_urls.get(pack.id) %}
-    <article id="pack-{{ pack.id }}" class="pack {% if shared_pack_id == pack.id or regenerated_pack_id == pack.id %}shared-now{% endif %}">
+    <article id="pack-{{ pack.id }}" class="pack {% if shared_pack_id == pack.id or result_pack_id == pack.id %}shared-now{% endif %}">
       <header>
         <div>
           <p class="eyebrow">{{ pack.recipe_name }} · {{ pack.ai_model }}</p>

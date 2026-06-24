@@ -556,11 +556,12 @@ async def workspace(request: Request, slug: str):
         shared_pack_id = int(shared_pack_raw)
     except ValueError:
         shared_pack_id = 0
-    regenerated_pack_raw = request.query_params.get("regenerated", "")
+    result_pack_raw = request.query_params.get(
+        "result", request.query_params.get("regenerated", ""))
     try:
-        regenerated_pack_id = int(regenerated_pack_raw)
+        result_pack_id = int(result_pack_raw)
     except ValueError:
-        regenerated_pack_id = 0
+        result_pack_id = 0
     job_focus_raw = request.query_params.get(
         "job", request.query_params.get("job_failed", ""))
     try:
@@ -601,9 +602,9 @@ async def workspace(request: Request, slug: str):
             p["id"]: f"{config.BASE_URL}/share/{p['share_token']}"
             for p in packs if p["share_token"]
         },
-        "job_rows": jobs.actionable_for_org(org["id"]),
+        "job_rows": jobs.workspace_for_org(org["id"], focus_job_id=job_focus_id),
         "shared_pack_id": shared_pack_id,
-        "regenerated_pack_id": regenerated_pack_id,
+        "result_pack_id": result_pack_id,
         "job_focus_id": job_focus_id,
         "can_manage_workspace": can_manage_workspace,
     })
@@ -740,6 +741,7 @@ async def support_dashboard(request: Request, slug: str):
         "audit_events": audit.recent_for_org(org["id"], limit=8),
         "jobs_pending": jobs.pending_count(org["id"]),
         "jobs_failed": jobs.failed_count(org["id"]),
+        "queue_stats": jobs.queue_stats_for_org(org["id"]),
         "recent_jobs": jobs.recent_for_org(org["id"], limit=8),
         "mise_bridge_armed": bool(config.MISE_IMPORT_TOKEN),
         "access_token_tail": org["access_token"][-6:],

@@ -127,6 +127,10 @@ def test_signup_queues_initial_pack_until_worker_drains(tmp_path, monkeypatch):
     assert done["result_pack_id"] == pack["id"]
     assert "Spring agnolotti" in pack["body_json"]
 
+    focused = client.get(res.headers["location"])
+    assert "done" in focused.text
+    assert f'/w/blue-plate?result={pack["id"]}#pack-{pack["id"]}' in focused.text
+
 
 def test_auth_cookies_use_secure_flag_when_configured(tmp_path, monkeypatch):
     configure_tmp_db(tmp_path, monkeypatch)
@@ -680,6 +684,9 @@ def test_failed_regeneration_job_can_retry_without_duplicate_pack(tmp_path, monk
     support = client.get("/w/blue-plate/support")
     assert support.status_code == 200
     assert "Generation jobs" in support.text
+    assert "Worker queue" in support.text
+    assert "50%" in support.text
+    assert "1 failed · 1 completed in 24h" in support.text
     assert "1 failed jobs" in support.text
 
     retry_failed = client.post(f"/w/blue-plate/jobs/{job['id']}/retry", follow_redirects=False)
@@ -927,6 +934,10 @@ def test_support_dashboard_surfaces_operator_state(tmp_path, monkeypatch):
     assert "Access roster" in page.text
     assert "Invite states" in page.text
     assert "Recent activity" in page.text
+    assert "Worker queue" in page.text
+    assert "Failure rate" in page.text
+    assert "Last completion" in page.text
+    assert f'/w/blue-plate?result={pack["id"]}#pack-{pack["id"]}' in page.text
     assert "jordan@example.com" in page.text
     assert "pending" in page.text
     assert "owner · active" in page.text

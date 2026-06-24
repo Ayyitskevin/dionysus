@@ -549,6 +549,7 @@ button:disabled {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1rem;
 }
+.queue-stats { margin-top: 1rem; }
 .support-stat {
   display: grid;
   gap: 0.35rem;

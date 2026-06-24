@@ -38,6 +38,35 @@
     </article>
   </div>
 
+  <section class="band settings-band">
+    <div class="section-row">
+      <h2>Worker queue</h2>
+      <span class="status-pill {% if queue_stats.failed %}failed{% elif queue_stats.queued or queue_stats.running %}running{% else %}done{% endif %}">{{ queue_stats.health_label }}</span>
+    </div>
+    <div class="support-stats queue-stats">
+      <article class="support-stat">
+        <span>Queued</span>
+        <strong>{{ queue_stats.queued }}</strong>
+        <p>{{ queue_stats.running }} running · {{ queue_stats.total }} total jobs</p>
+      </article>
+      <article class="support-stat">
+        <span>Oldest active</span>
+        <strong>{{ queue_stats.oldest_active_label }}</strong>
+        <p>{% if queue_stats.oldest_active_job_id %}job #{{ queue_stats.oldest_active_job_id }} · {{ queue_stats.oldest_active_status }}{% else %}No queued or running jobs{% endif %}</p>
+      </article>
+      <article class="support-stat">
+        <span>Failure rate</span>
+        <strong>{{ queue_stats.failure_rate_24h }}%</strong>
+        <p>{{ queue_stats.failed_24h }} failed · {{ queue_stats.done_24h }} completed in 24h</p>
+      </article>
+      <article class="support-stat">
+        <span>Last completion</span>
+        <strong>{{ queue_stats.done }}</strong>
+        <p>{% if queue_stats.last_completed_at %}latest {{ queue_stats.last_completed_at }}{% else %}No completed jobs yet{% endif %}</p>
+      </article>
+    </div>
+  </section>
+
   <div class="support-grid">
     <section class="panel">
       <div class="section-row">
@@ -88,6 +117,9 @@
         </div>
         <div class="pack-actions">
           <span class="status-pill {{ job.status }}">{{ job.status }}</span>
+          {% if job.result_pack_id %}
+          <a class="button ghost" href="/w/{{ org.slug }}?result={{ job.result_pack_id }}#pack-{{ job.result_pack_id }}">Open result</a>
+          {% endif %}
           {% if job.status == "failed" %}
           <form method="post" action="/w/{{ org.slug }}/jobs/{{ job.id }}/retry"><button class="secondary">Retry</button></form>
           {% endif %}

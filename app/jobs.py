@@ -287,6 +287,17 @@ def actionable_for_org(org_id: int, *, limit: int = 8) -> list[dict]:
     return [_job(row) for row in rows]
 
 
+def workspace_for_org(org_id: int, *, focus_job_id: int = 0,
+                      limit: int = 8) -> list[dict]:
+    rows = actionable_for_org(org_id, limit=limit)
+    if not focus_job_id or any(job["id"] == focus_job_id for job in rows):
+        return rows
+    focused = get_for_org(focus_job_id, org_id)
+    if not focused:
+        return rows
+    return [focused, *rows[:max(limit - 1, 0)]]
+
+
 def recent_for_org(org_id: int, *, limit: int = 10) -> list[dict]:
     rows = db.all_("""SELECT j.*, sp.title AS source_pack_title,
                              rp.title AS result_pack_title
@@ -297,6 +308,87 @@ def recent_for_org(org_id: int, *, limit: int = 10) -> list[dict]:
                       ORDER BY j.created_at DESC, j.id DESC
                       LIMIT ?""", (org_id, limit))
     return [_job(row) for row in rows]
+
+
+def _duration_label(seconds: int | None) -> str:
+    if seconds is None:
+        return "No backlog"
+    seconds = max(int(seconds), 0)
+    if seconds < 60:
+        return "<1m"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    if seconds < 86400:
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        return f"{hours}h {minutes}m" if minutes else f"{hours}h"
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
+    return f"{days}d {hours}h" if hours else f"{days}d"
+
+
+def queue_stats_for_org(org_id: int) -> dict:
+    row = db.one("""SELECT
+                        COUNT(*) AS total,
+                        COALESCE(SUM(CASE WHEN status='queued' THEN 1 ELSE 0 END), 0)
+                            AS queued,
+                        COALESCE(SUM(CASE WHEN status='running' THEN 1 ELSE 0 END), 0)
+                            AS running,
+                        COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END), 0)
+                            AS failed,
+                        COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END), 0)
+                            AS done,
+                        COALESCE(SUM(CASE
+                            WHEN status='failed'
+                             AND datetime(COALESCE(updated_at, created_at))
+                                 >= datetime('now', '-24 hours')
+                            THEN 1 ELSE 0 END), 0) AS failed_24h,
+                        COALESCE(SUM(CASE
+                            WHEN status='done'
+                             AND datetime(COALESCE(completed_at, updated_at, created_at))
+                                 >= datetime('now', '-24 hours')
+                            THEN 1 ELSE 0 END), 0) AS done_24h,
+                        MAX(completed_at) AS last_completed_at
+                     FROM jobs
+                     WHERE org_id=?""", (org_id,))
+    oldest = db.one("""SELECT id, status, created_at,
+                               CAST((julianday('now') - julianday(created_at)) * 86400
+                                    AS INTEGER) AS age_seconds
+                        FROM jobs
+                        WHERE org_id=? AND status IN ('queued','running')
+                        ORDER BY created_at, id
+                        LIMIT 1""", (org_id,))
+    done_24h = int(row["done_24h"] if row else 0)
+    failed_24h = int(row["failed_24h"] if row else 0)
+    recent_attempts = done_24h + failed_24h
+    failure_rate = round((failed_24h / recent_attempts) * 100) if recent_attempts else 0
+    failed = int(row["failed"] if row else 0)
+    queued = int(row["queued"] if row else 0)
+    running = int(row["running"] if row else 0)
+    if failed:
+        health_label = "needs retry"
+    elif queued or running:
+        health_label = "working"
+    else:
+        health_label = "clear"
+    age_seconds = oldest["age_seconds"] if oldest else None
+    return {
+        "total": int(row["total"] if row else 0),
+        "queued": queued,
+        "running": running,
+        "failed": failed,
+        "done": int(row["done"] if row else 0),
+        "done_24h": done_24h,
+        "failed_24h": failed_24h,
+        "failure_rate_24h": failure_rate,
+        "oldest_active_job_id": oldest["id"] if oldest else None,
+        "oldest_active_status": oldest["status"] if oldest else None,
+        "oldest_active_at": oldest["created_at"] if oldest else None,
+        "oldest_active_age_seconds": age_seconds,
+        "oldest_active_label": _duration_label(age_seconds),
+        "last_completed_at": row["last_completed_at"] if row else None,
+        "health_label": health_label,
+    }
 
 
 def pending_count(org_id: int | None = None) -> int:
