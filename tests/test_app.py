@@ -387,6 +387,15 @@ def test_plain_members_can_draft_but_not_publish_packs(tmp_path, monkeypatch):
         f"/w/blue-plate/packs/{pack['id']}/export.md",
         follow_redirects=False,
     )
+    revise = member_client.post(
+        f"/w/blue-plate/packs/{pack['id']}/revise",
+        data={
+            "title": "Member rewrite",
+            "strategy": "Member strategy",
+            "shot_list": "Member shot",
+        },
+        follow_redirects=False,
+    )
     unchanged = db.one("SELECT * FROM content_packs WHERE id=?", (pack["id"],))
 
     assert generated.status_code == 303
@@ -395,13 +404,78 @@ def test_plain_members_can_draft_but_not_publish_packs(tmp_path, monkeypatch):
     assert f'/w/blue-plate/packs/{pack["id"]}/approve' not in page.text
     assert f'/w/blue-plate/packs/{pack["id"]}/share' not in page.text
     assert f'/w/blue-plate/packs/{pack["id"]}/export.md' not in page.text
+    assert f'/w/blue-plate/packs/{pack["id"]}/revise' not in page.text
     assert "Ask an owner or admin to approve, share, or export this pack." in page.text
     assert approve.status_code == 403
     assert share.status_code == 403
     assert export.status_code == 403
+    assert revise.status_code == 403
     assert unchanged["status"] == "draft"
     assert unchanged["share_token"] is None
     assert unchanged["exported_at"] is None
+
+
+def test_owner_can_revise_draft_pack_before_approval(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    signup(client)
+    pack = db.one("SELECT * FROM content_packs")
+    page = client.get("/w/blue-plate")
+    assert f'/w/blue-plate/packs/{pack["id"]}/revise' in page.text
+    assert f'/w/blue-plate/packs/{pack["id"]}/share' not in page.text
+    assert f'/w/blue-plate/packs/{pack["id"]}/export.md' not in page.text
+
+    draft_share = client.post(f"/w/blue-plate/packs/{pack['id']}/share", follow_redirects=False)
+    draft_export = client.get(f"/w/blue-plate/packs/{pack['id']}/export.md")
+    unchanged = db.one("SELECT * FROM content_packs WHERE id=?", (pack["id"],))
+    assert draft_share.status_code == 400
+    assert draft_export.status_code == 400
+    assert unchanged["share_token"] is None
+    assert unchanged["exported_at"] is None
+
+    revise = client.post(
+        f"/w/blue-plate/packs/{pack['id']}/revise",
+        data={
+            "title": "Chef tasting rollout",
+            "strategy": "Lead with the tasting menu and reserve Friday.",
+            "shot_list": "- Hero scallop plate\nHands plating sauce",
+            "captions": "Friday tables are built around this tasting menu.",
+            "exports": "Instagram: reservation CTA",
+            "upsells": "Add delivery-app crop set",
+        },
+        follow_redirects=False,
+    )
+    assert revise.status_code == 303
+    assert revise.headers["location"] == f"/w/blue-plate?revised={pack['id']}#pack-{pack['id']}"
+
+    updated = db.one("SELECT * FROM content_packs WHERE id=?", (pack["id"],))
+    body = json.loads(updated["body_json"])
+    assert updated["title"] == "Chef tasting rollout"
+    assert updated["status"] == "draft"
+    assert body["headline"] == "Chef tasting rollout"
+    assert body["strategy"] == "Lead with the tasting menu and reserve Friday."
+    assert body["shot_list"] == ["Hero scallop plate", "Hands plating sauce"]
+    assert body["captions"] == ["Friday tables are built around this tasting menu."]
+    assert body["exports"] == ["Instagram: reservation CTA"]
+    assert body["upsells"] == ["Add delivery-app crop set"]
+    assert json.loads(updated["ai_draft_original"])["headline"] == "First monthly content pack"
+
+    event = db.one("SELECT * FROM audit_events WHERE action='pack.revised'")
+    assert event["entity_id"] == pack["id"]
+    assert "Chef tasting rollout" in event["summary"]
+
+    approve = client.post(f"/w/blue-plate/packs/{pack['id']}/approve", follow_redirects=False)
+    assert approve.status_code == 303
+    blocked = client.post(
+        f"/w/blue-plate/packs/{pack['id']}/revise",
+        data={
+            "title": "After approval",
+            "strategy": "Nope",
+            "shot_list": "Nope",
+        },
+        follow_redirects=False,
+    )
+    assert blocked.status_code == 400
 
 
 def test_member_role_update_and_revoke_remove_access(tmp_path, monkeypatch):
@@ -462,6 +536,8 @@ def test_settings_revoke_share_token_removes_public_access(tmp_path, monkeypatch
     client = TestClient(app)
     res = signup(client)
     pack = db.one("SELECT * FROM content_packs")
+    approve = client.post(f"/w/blue-plate/packs/{pack['id']}/approve", follow_redirects=False)
+    assert approve.status_code == 303
     share = client.post(f"/w/blue-plate/packs/{pack['id']}/share", follow_redirects=False)
     assert share.status_code == 303
     token = db.one("SELECT share_token FROM content_packs WHERE id=?", (pack["id"],))["share_token"]

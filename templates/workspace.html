@@ -96,14 +96,15 @@
         {% if can_manage_workspace %}
           {% if latest_pack.status == "draft" %}
           <form method="post" action="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/approve"><button>Approve pack</button></form>
-          {% endif %}
-          {% if latest_share_url %}
-          <a class="button secondary" href="{{ latest_share_url }}">Open share page</a>
           {% else %}
-          <form method="post" action="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/share"><button class="secondary">Create share link</button></form>
+            {% if latest_share_url %}
+            <a class="button secondary" href="{{ latest_share_url }}">Open share page</a>
+            {% else %}
+            <form method="post" action="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/share"><button class="secondary">Create share link</button></form>
+            {% endif %}
+            <a class="button ghost" href="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/export.md">Export Markdown</a>
+            <a class="button ghost" href="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/export.txt">Copy text</a>
           {% endif %}
-          <a class="button ghost" href="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/export.md">Export Markdown</a>
-          <a class="button ghost" href="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/export.txt">Copy text</a>
         {% else %}
           <span class="muted">Ask an owner or admin to approve, share, or export this pack.</span>
         {% endif %}
@@ -209,14 +210,15 @@
           {% if can_manage_workspace %}
             {% if pack.status == "draft" %}
             <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/approve"><button class="ghost">Approve</button></form>
-            {% endif %}
-            {% if share_url %}
-            <a class="button" href="{{ share_url }}">Open share</a>
             {% else %}
-            <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/share"><button>Share</button></form>
+              {% if share_url %}
+              <a class="button" href="{{ share_url }}">Open share</a>
+              {% else %}
+              <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/share"><button>Share</button></form>
+              {% endif %}
+              <a class="button secondary" href="/w/{{ org.slug }}/packs/{{ pack.id }}/export.md">Markdown</a>
+              <a class="button secondary" href="/w/{{ org.slug }}/packs/{{ pack.id }}/export.txt">Text</a>
             {% endif %}
-            <a class="button secondary" href="/w/{{ org.slug }}/packs/{{ pack.id }}/export.md">Markdown</a>
-            <a class="button secondary" href="/w/{{ org.slug }}/packs/{{ pack.id }}/export.txt">Text</a>
           {% else %}
             <span class="muted">Owner/admin publishes</span>
           {% endif %}
@@ -241,6 +243,22 @@
         <div><h4>Exports</h4><ul>{% for x in body.exports %}<li>{{ x }}</li>{% endfor %}</ul></div>
         <div><h4>Upsells</h4><ul>{% for x in body.upsells %}<li>{{ x }}</li>{% endfor %}</ul></div>
       </div>
+      {% if can_manage_workspace and pack.status == "draft" %}
+      <details class="revision-panel">
+        <summary>Revise draft</summary>
+        <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/revise" class="revision-form">
+          <label>Title <input name="title" required value="{{ pack.title }}"></label>
+          <label>Strategy <textarea name="strategy" required>{{ body.strategy }}</textarea></label>
+          <div class="revision-grid">
+            <label>Shot list <textarea name="shot_list">{{ body.shot_list|join('\n') }}</textarea></label>
+            <label>Captions <textarea name="captions">{{ body.captions|join('\n') }}</textarea></label>
+            <label>Exports <textarea name="exports">{{ body.exports|join('\n') }}</textarea></label>
+            <label>Upsells <textarea name="upsells">{{ body.upsells|join('\n') }}</textarea></label>
+          </div>
+          <button>Save revision</button>
+        </form>
+      </details>
+      {% endif %}
     </article>
   {% else %}
     <div class="empty-state">

@@ -968,6 +968,66 @@ async def generate_pack(request: Request, slug: str, campaign_id: int,
     return RedirectResponse(f"/w/{slug}#packs", status_code=303)
 
 
+def _revision_lines(raw: str) -> list[str]:
+    lines = []
+    for line in raw.splitlines():
+        clean = line.strip()
+        if clean.startswith("- "):
+            clean = clean[2:].strip()
+        if clean:
+            lines.append(clean)
+    return lines
+
+
+def _require_publishable_pack(pack) -> None:
+    if pack["status"] == "draft":
+        raise HTTPException(status_code=400, detail="approve pack before publishing")
+
+
+@app.post("/w/{slug}/packs/{pack_id}/revise")
+async def revise_pack(request: Request, slug: str, pack_id: int,
+                      title: str = Form(...), strategy: str = Form(...),
+                      shot_list: str = Form(""), captions: str = Form(""),
+                      exports: str = Form(""), upsells: str = Form("")):
+    org, user, _ = _require_owner(request, slug)
+    pack = pack_utils.get_for_org(pack_id, org["id"])
+    if not pack:
+        raise HTTPException(status_code=404, detail="pack not found")
+    if pack["status"] != "draft":
+        raise HTTPException(status_code=400, detail="only draft packs can be revised")
+    title = title.strip()
+    strategy = strategy.strip()
+    if not title or not strategy:
+        raise HTTPException(status_code=400, detail="title and strategy are required")
+    revised = pack_utils.body(pack)
+    revised["headline"] = title
+    revised["strategy"] = strategy
+    revised["shot_list"] = _revision_lines(shot_list)
+    revised["captions"] = _revision_lines(captions)
+    revised["exports"] = _revision_lines(exports)
+    revised["upsells"] = _revision_lines(upsells)
+    if not any(revised[key] for key in ("shot_list", "captions", "exports", "upsells")):
+        raise HTTPException(status_code=400, detail="at least one pack section is required")
+    db.run("""UPDATE content_packs
+              SET title=?, body_json=?, updated_at=datetime('now')
+              WHERE id=?""", (title, json.dumps(revised), pack_id))
+    audit.log_event(
+        org["id"], "pack.revised",
+        actor_user_id=audit.actor_id(user), entity_type="content_pack", entity_id=pack_id,
+        summary=f"Revised draft pack: {title}.",
+        details={
+            "previous_title": pack["title"],
+            "pack_title": title,
+            "section_counts": {
+                "shot_list": len(revised["shot_list"]),
+                "captions": len(revised["captions"]),
+                "exports": len(revised["exports"]),
+                "upsells": len(revised["upsells"]),
+            },
+        })
+    return RedirectResponse(f"/w/{slug}?revised={pack_id}#pack-{pack_id}", status_code=303)
+
+
 @app.post("/w/{slug}/packs/{pack_id}/approve")
 async def approve_pack(request: Request, slug: str, pack_id: int):
     org, user, _ = _require_owner(request, slug)
@@ -990,6 +1050,7 @@ async def share_pack(request: Request, slug: str, pack_id: int):
     pack = pack_utils.get_for_org(pack_id, org["id"])
     if not pack:
         raise HTTPException(status_code=404, detail="pack not found")
+    _require_publishable_pack(pack)
     had_token = bool(pack["share_token"])
     token = pack_utils.ensure_share_token(pack_id)
     verb = "Reused" if had_token else "Created"
@@ -1034,6 +1095,7 @@ async def export_pack(request: Request, slug: str, pack_id: int, fmt: str):
     pack = pack_utils.get_for_org(pack_id, org["id"])
     if not pack:
         raise HTTPException(status_code=404, detail="pack not found")
+    _require_publishable_pack(pack)
     resp = _export_response(pack, fmt)
     audit.log_event(
         org["id"], "pack.exported",
