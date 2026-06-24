@@ -970,7 +970,7 @@ async def generate_pack(request: Request, slug: str, campaign_id: int,
 
 @app.post("/w/{slug}/packs/{pack_id}/approve")
 async def approve_pack(request: Request, slug: str, pack_id: int):
-    org, user = _require_workspace(request, slug)
+    org, user, _ = _require_owner(request, slug)
     pack = pack_utils.get_for_org(pack_id, org["id"])
     if not pack:
         raise HTTPException(status_code=404, detail="pack not found")
@@ -986,7 +986,7 @@ async def approve_pack(request: Request, slug: str, pack_id: int):
 
 @app.post("/w/{slug}/packs/{pack_id}/share")
 async def share_pack(request: Request, slug: str, pack_id: int):
-    org, user = _require_workspace(request, slug)
+    org, user, _ = _require_owner(request, slug)
     pack = pack_utils.get_for_org(pack_id, org["id"])
     if not pack:
         raise HTTPException(status_code=404, detail="pack not found")
@@ -1005,7 +1005,7 @@ async def share_pack(request: Request, slug: str, pack_id: int):
     return RedirectResponse(f"/w/{slug}?shared={pack_id}#pack-{pack_id}", status_code=303)
 
 
-def _export_response(pack, fmt: str):
+def _export_response(pack, fmt: str, *, mark_exported: bool = True):
     if fmt == "md":
         content = pack_utils.markdown(pack)
         media_type = "text/markdown; charset=utf-8"
@@ -1020,8 +1020,9 @@ def _export_response(pack, fmt: str):
         ext = "json"
     else:
         raise HTTPException(status_code=404, detail="unknown export format")
-    db.run("""UPDATE content_packs SET status='exported', exported_at=datetime('now'),
-              updated_at=datetime('now') WHERE id=?""", (pack["id"],))
+    if mark_exported:
+        db.run("""UPDATE content_packs SET status='exported', exported_at=datetime('now'),
+                  updated_at=datetime('now') WHERE id=?""", (pack["id"],))
     headers = {"Content-Disposition":
                f'attachment; filename="{pack_utils.filename(pack, ext)}"'}
     return Response(content, media_type=media_type, headers=headers)
@@ -1029,7 +1030,7 @@ def _export_response(pack, fmt: str):
 
 @app.get("/w/{slug}/packs/{pack_id}/export.{fmt}")
 async def export_pack(request: Request, slug: str, pack_id: int, fmt: str):
-    org, user = _require_workspace(request, slug)
+    org, user, _ = _require_owner(request, slug)
     pack = pack_utils.get_for_org(pack_id, org["id"])
     if not pack:
         raise HTTPException(status_code=404, detail="pack not found")
@@ -1059,7 +1060,7 @@ async def export_shared_pack(token: str, fmt: str):
     pack = pack_utils.get_by_token(token)
     if not pack:
         raise HTTPException(status_code=404, detail="shared pack not found")
-    return _export_response(pack, fmt)
+    return _export_response(pack, fmt, mark_exported=False)
 
 
 @app.get("/share/{token}/copy.txt", response_class=PlainTextResponse)

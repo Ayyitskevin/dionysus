@@ -24,9 +24,12 @@
 <section class="next-step">
   <div>
     <p class="eyebrow">Next best action</p>
-    {% if latest_pack %}
+    {% if latest_pack and can_manage_workspace %}
       <h2>Approve, share, and export this first pack.</h2>
       <p>This is the production loop: approve the pack, create a share link, and export copy for client follow-through.</p>
+    {% elif latest_pack %}
+      <h2>Review this pack and send feedback to an owner or admin.</h2>
+      <p>Members can shape drafts; owners and admins handle approval, public sharing, and export handoff.</p>
     {% else %}
       <h2>Add one input and generate your first pack.</h2>
       <p>Platekit works best with one clear dish, offer, or client target plus a business goal.</p>
@@ -80,7 +83,7 @@
           <strong>Export</strong><span>{% if latest_pack.exported_at %}Exported for handoff.{% else %}Download Markdown or copy plain text when ready.{% endif %}</span>
         </li>
       </ol>
-      {% if latest_share_url %}
+      {% if can_manage_workspace and latest_share_url %}
       <div class="share-strip {% if shared_pack_id == latest_pack.id %}is-new{% endif %}">
         <div>
           <strong>{% if shared_pack_id == latest_pack.id %}Share link ready{% else %}Share link{% endif %}</strong>
@@ -90,16 +93,20 @@
       </div>
       {% endif %}
       <div class="first-actions">
-        {% if latest_pack.status == "draft" %}
-        <form method="post" action="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/approve"><button>Approve pack</button></form>
-        {% endif %}
-        {% if latest_share_url %}
-        <a class="button secondary" href="{{ latest_share_url }}">Open share page</a>
+        {% if can_manage_workspace %}
+          {% if latest_pack.status == "draft" %}
+          <form method="post" action="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/approve"><button>Approve pack</button></form>
+          {% endif %}
+          {% if latest_share_url %}
+          <a class="button secondary" href="{{ latest_share_url }}">Open share page</a>
+          {% else %}
+          <form method="post" action="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/share"><button class="secondary">Create share link</button></form>
+          {% endif %}
+          <a class="button ghost" href="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/export.md">Export Markdown</a>
+          <a class="button ghost" href="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/export.txt">Copy text</a>
         {% else %}
-        <form method="post" action="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/share"><button class="secondary">Create share link</button></form>
+          <span class="muted">Ask an owner or admin to approve, share, or export this pack.</span>
         {% endif %}
-        <a class="button ghost" href="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/export.md">Export Markdown</a>
-        <a class="button ghost" href="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/export.txt">Copy text</a>
       </div>
     </div>
     <div class="first-proof">
@@ -199,19 +206,23 @@
         </div>
         <div class="pack-actions">
           <span>{{ pack.status }}</span>
-          {% if pack.status == "draft" %}
-          <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/approve"><button class="ghost">Approve</button></form>
-          {% endif %}
-          {% if share_url %}
-          <a class="button" href="{{ share_url }}">Open share</a>
+          {% if can_manage_workspace %}
+            {% if pack.status == "draft" %}
+            <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/approve"><button class="ghost">Approve</button></form>
+            {% endif %}
+            {% if share_url %}
+            <a class="button" href="{{ share_url }}">Open share</a>
+            {% else %}
+            <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/share"><button>Share</button></form>
+            {% endif %}
+            <a class="button secondary" href="/w/{{ org.slug }}/packs/{{ pack.id }}/export.md">Markdown</a>
+            <a class="button secondary" href="/w/{{ org.slug }}/packs/{{ pack.id }}/export.txt">Text</a>
           {% else %}
-          <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/share"><button>Share</button></form>
+            <span class="muted">Owner/admin publishes</span>
           {% endif %}
-          <a class="button secondary" href="/w/{{ org.slug }}/packs/{{ pack.id }}/export.md">Markdown</a>
-          <a class="button secondary" href="/w/{{ org.slug }}/packs/{{ pack.id }}/export.txt">Text</a>
         </div>
       </header>
-      {% if share_url %}
+      {% if can_manage_workspace and share_url %}
       <div class="share-strip compact {% if shared_pack_id == pack.id %}is-new{% endif %}">
         <div>
           <strong>{% if shared_pack_id == pack.id %}Share link ready{% else %}Share link{% endif %}</strong>

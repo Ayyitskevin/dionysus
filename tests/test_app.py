@@ -351,6 +351,59 @@ def test_plain_members_cannot_access_billing_money_path(tmp_path, monkeypatch):
     assert org["plan"] == "restaurant_growth"
 
 
+def test_plain_members_can_draft_but_not_publish_packs(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    owner = TestClient(app)
+    signup(owner)
+    owner.post("/w/blue-plate/settings/members/invite", data={
+        "email": "publisher@example.com",
+        "role": "member",
+    }, follow_redirects=False)
+    invite = db.one("SELECT * FROM workspace_invites WHERE email='publisher@example.com'")
+    member_client = TestClient(app)
+    member_client.post(f"/invite/{invite['token']}/accept", data={
+        "name": "Publisher",
+        "password": "correct-horse",
+    }, follow_redirects=False)
+    campaign = db.one("SELECT id FROM campaigns LIMIT 1")
+    recipe = db.one("SELECT id FROM content_recipes WHERE slug='menu-launch'")
+
+    generated = member_client.post(
+        f"/w/blue-plate/campaigns/{campaign['id']}/generate",
+        data={"recipe_id": recipe["id"]},
+        follow_redirects=False,
+    )
+    pack = db.one("SELECT * FROM content_packs ORDER BY id DESC LIMIT 1")
+    page = member_client.get("/w/blue-plate")
+    approve = member_client.post(
+        f"/w/blue-plate/packs/{pack['id']}/approve",
+        follow_redirects=False,
+    )
+    share = member_client.post(
+        f"/w/blue-plate/packs/{pack['id']}/share",
+        follow_redirects=False,
+    )
+    export = member_client.get(
+        f"/w/blue-plate/packs/{pack['id']}/export.md",
+        follow_redirects=False,
+    )
+    unchanged = db.one("SELECT * FROM content_packs WHERE id=?", (pack["id"],))
+
+    assert generated.status_code == 303
+    assert pack["status"] == "draft"
+    assert page.status_code == 200
+    assert f'/w/blue-plate/packs/{pack["id"]}/approve' not in page.text
+    assert f'/w/blue-plate/packs/{pack["id"]}/share' not in page.text
+    assert f'/w/blue-plate/packs/{pack["id"]}/export.md' not in page.text
+    assert "Ask an owner or admin to approve, share, or export this pack." in page.text
+    assert approve.status_code == 403
+    assert share.status_code == 403
+    assert export.status_code == 403
+    assert unchanged["status"] == "draft"
+    assert unchanged["share_token"] is None
+    assert unchanged["exported_at"] is None
+
+
 def test_member_role_update_and_revoke_remove_access(tmp_path, monkeypatch):
     configure_tmp_db(tmp_path, monkeypatch)
     owner = TestClient(app)
@@ -771,6 +824,10 @@ def test_pack_share_page_and_exports(tmp_path, monkeypatch):
     assert md.headers["content-type"].startswith("text/markdown")
     assert "# First monthly content pack" in md.text
     assert "## Shot List" in md.text
+    assert db.one("SELECT status FROM content_packs WHERE id=?", (pack["id"],))["status"] == "approved"
+
+    owner_export = client.get(f"/w/blue-plate/packs/{pack['id']}/export.md")
+    assert owner_export.status_code == 200
     assert db.one("SELECT status FROM content_packs WHERE id=?", (pack["id"],))["status"] == "exported"
 
     txt = client.get(f"/share/{token}/copy.txt")
