@@ -117,6 +117,12 @@ python -m app.cli backup ./data/backups
 python -m app.cli verify-backup ./data/backups/<backup>.db
 ```
 
+Inspect recent auth-abuse buckets without printing emails, IPs, or invite tokens:
+
+```bash
+python -m app.cli rate-limits --window 900 --limit 20
+```
+
 ## Verification
 
 ```bash

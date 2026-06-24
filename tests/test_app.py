@@ -1622,6 +1622,37 @@ def test_cli_worker_once_processes_queued_signup_job(tmp_path, monkeypatch, caps
     assert db.one("SELECT COUNT(*) AS n FROM content_packs")["n"] == 1
 
 
+def test_cli_rate_limits_summarizes_without_sensitive_identities(tmp_path, monkeypatch, capsys):
+    configure_tmp_db(tmp_path, monkeypatch)
+    from app import cli
+
+    sensitive_login = rate_limit.identity("203.0.113.9", "leakme@example.com")
+    sensitive_invite = rate_limit.identity("198.51.100.2", "super-secret-token")
+    rate_limit.check("login:subject_ip", sensitive_login, limit=20, window_seconds=900)
+    rate_limit.check("login:subject_ip", sensitive_login, limit=20, window_seconds=900)
+    rate_limit.check("invite_accept:subject_ip", sensitive_invite,
+                     limit=20, window_seconds=900)
+    db.run("""INSERT INTO rate_limit_events (action, identity, created_at)
+              VALUES (?, ?, datetime('now', '-2 hours'))""",
+           ("signup:subject_ip", rate_limit.identity("old@example.com")))
+
+    assert cli.main(["rate-limits", "--window", "900", "--limit", "5"]) == 0
+    output = capsys.readouterr().out
+    assert "rate_limits\twindow=900\taction=all\trows=2" in output
+    assert "login:subject_ip\tattempts=2\tbucket=rl_" in output
+    assert "invite_accept:subject_ip\tattempts=1\tbucket=rl_" in output
+    assert "leakme@example.com" not in output
+    assert "super-secret-token" not in output
+    assert "203.0.113.9" not in output
+    assert "old@example.com" not in output
+
+    assert cli.main(["rate-limits", "--action", "login:subject_ip"]) == 0
+    filtered = capsys.readouterr().out
+    assert "rate_limits\twindow=900\taction=login:subject_ip\trows=1" in filtered
+    assert "login:subject_ip\tattempts=2" in filtered
+    assert "invite_accept:subject_ip" not in filtered
+
+
 def test_cli_backup_creates_private_verified_snapshot(tmp_path, monkeypatch, capsys):
     configure_tmp_db(tmp_path, monkeypatch)
     client = TestClient(app)

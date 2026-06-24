@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+
 from fastapi import Request
 
-from . import db
+from . import config, db
 
 AUTH_WINDOW_SECONDS = 15 * 60
 LOGIN_SUBJECT_LIMIT = 5
@@ -29,6 +32,51 @@ def client_ip(request: Request) -> str:
 
 def identity(*parts: str) -> str:
     return ":".join((part or "-").strip().lower() or "-" for part in parts)
+
+
+def bucket_fingerprint(action: str, identity_value: str) -> str:
+    secret = config.SECRET_KEY.encode("utf-8")
+    normalized = f"{action.strip().lower()}\0{identity(identity_value)}"
+    digest = hmac.new(secret, normalized.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"rl_{digest[:12]}"
+
+
+def recent_summary(
+    *,
+    window_seconds: int = AUTH_WINDOW_SECONDS,
+    limit: int = 20,
+    action: str = "",
+) -> list[dict]:
+    if window_seconds <= 0 or limit <= 0:
+        return []
+    filters = ["datetime(created_at) >= datetime('now', ?)"]
+    params: list[object] = [f"-{int(window_seconds)} seconds"]
+    action = action.strip().lower()
+    if action:
+        filters.append("action=?")
+        params.append(action)
+    params.append(int(limit))
+    rows = db.all_(
+        f"""SELECT action, identity, COUNT(*) AS attempts,
+                  MIN(created_at) AS first_seen,
+                  MAX(created_at) AS last_seen
+           FROM rate_limit_events
+           WHERE {' AND '.join(filters)}
+           GROUP BY action, identity
+           ORDER BY attempts DESC, datetime(last_seen) DESC, action ASC
+           LIMIT ?""",
+        tuple(params),
+    )
+    return [
+        {
+            "action": row["action"],
+            "attempts": row["attempts"],
+            "first_seen": row["first_seen"],
+            "last_seen": row["last_seen"],
+            "bucket": bucket_fingerprint(row["action"], row["identity"]),
+        }
+        for row in rows
+    ]
 
 
 def check(action: str, identity_value: str, *, limit: int, window_seconds: int) -> None:

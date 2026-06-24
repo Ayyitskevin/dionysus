@@ -3,13 +3,14 @@
 from pathlib import Path
 import sys
 
-from . import backups, config, db, jobs, seed
+from . import backups, config, db, jobs, rate_limit, seed
 from .readiness import summary
 
 
 USAGE = (
     "usage: python -m app.cli "
-    "[backup [destination-dir]|check-production|migrate|seed-demo|"
+    "[backup [destination-dir]|check-production|migrate|rate-limits "
+    "[--window SECONDS|--limit N|--action ACTION]|seed-demo|"
     "verify-backup <db>|worker [--once|--limit N|--poll SECONDS]]"
 )
 
@@ -51,6 +52,9 @@ def main(argv: list[str] | None = None) -> int:
     if command == "worker":
         return _worker(argv[1:])
 
+    if command == "rate-limits":
+        return _rate_limits(argv[1:])
+
     if command == "backup":
         if len(argv) > 2:
             print(USAGE)
@@ -79,6 +83,56 @@ def main(argv: list[str] | None = None) -> int:
 
     print(USAGE)
     return 2
+
+
+def _rate_limits(argv: list[str]) -> int:
+    window_seconds = rate_limit.AUTH_WINDOW_SECONDS
+    limit = 20
+    action = ""
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--window" and i + 1 < len(argv):
+            try:
+                window_seconds = int(argv[i + 1])
+            except ValueError:
+                print(USAGE)
+                return 2
+            i += 2
+            continue
+        if arg == "--limit" and i + 1 < len(argv):
+            try:
+                limit = int(argv[i + 1])
+            except ValueError:
+                print(USAGE)
+                return 2
+            i += 2
+            continue
+        if arg == "--action" and i + 1 < len(argv):
+            action = argv[i + 1].strip().lower()
+            i += 2
+            continue
+        print(USAGE)
+        return 2
+    if window_seconds < 1 or limit < 1:
+        print(USAGE)
+        return 2
+
+    db.migrate()
+    rows = rate_limit.recent_summary(
+        window_seconds=window_seconds,
+        limit=limit,
+        action=action,
+    )
+    action_label = action or "all"
+    print(f"rate_limits\twindow={window_seconds}\taction={action_label}\trows={len(rows)}")
+    for row in rows:
+        print(
+            f"{row['action']}\tattempts={row['attempts']}"
+            f"\tbucket={row['bucket']}\tfirst={row['first_seen']}"
+            f"\tlast={row['last_seen']}"
+        )
+    return 0
 
 
 def _worker(argv: list[str]) -> int:
