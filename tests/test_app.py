@@ -912,21 +912,39 @@ def test_mise_packs_api_returns_only_approved_or_exported_by_default(tmp_path, m
     assert api_pack["title"] == "First monthly content pack"
     assert api_pack["status"] == "approved"
     assert api_pack["campaign"]["title"] == "First monthly content pack"
-    assert api_pack["share_url"].startswith("http")
+    assert api_pack["share_url"] is None
+    share_token = db.one(
+        "SELECT share_token FROM content_packs WHERE id=?", (pack["id"],)
+    )["share_token"]
+    assert share_token is None
     assert "## Shot List" in api_pack["markdown"]
     assert "Spring agnolotti" in api_pack["markdown"]
+
+    client.post(f"/w/blue-plate/packs/{pack['id']}/share", follow_redirects=False)
+    shared = client.get(
+        "/api/mise/organizations/blue-plate/packs",
+        headers={"Authorization": "Bearer mise-test"},
+    )
+    shared_pack = shared.json()["packs"][0]
+    assert shared_pack["share_url"].startswith("http")
 
 
 def test_mise_packs_api_can_include_drafts(tmp_path, monkeypatch):
     configure_tmp_db(tmp_path, monkeypatch)
     client = TestClient(app)
     signup(client)
+    pack = db.one("SELECT * FROM content_packs")
     res = client.get(
         "/api/mise/organizations/blue-plate/packs?include_drafts=true",
         headers={"Authorization": "Bearer mise-test"},
     )
     assert res.status_code == 200
     assert len(res.json()["packs"]) == 1
+    assert res.json()["packs"][0]["share_url"] is None
+    share_token = db.one(
+        "SELECT share_token FROM content_packs WHERE id=?", (pack["id"],)
+    )["share_token"]
+    assert share_token is None
 
 
 

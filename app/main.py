@@ -1143,7 +1143,9 @@ async def stripe_webhook(request: Request):
 
 
 def _pack_api_payload(pack) -> dict:
-    token = pack["share_token"] or pack_utils.ensure_share_token(pack["id"])
+    share_url = None
+    if pack["share_token"]:
+        share_url = f"{config.BASE_URL}/share/{pack['share_token']}"
     return {
         "id": pack["id"],
         "title": pack["title"],
@@ -1154,7 +1156,7 @@ def _pack_api_payload(pack) -> dict:
         "created_at": pack["created_at"],
         "approved_at": pack["approved_at"],
         "exported_at": pack["exported_at"],
-        "share_url": f"{config.BASE_URL}/share/{token}",
+        "share_url": share_url,
         "markdown": pack_utils.markdown(pack),
         "body": pack_utils.body(pack),
     }

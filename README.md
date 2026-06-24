@@ -54,9 +54,11 @@ POST /api/mise/organizations/{slug}/argus-pack
 Authorization: Bearer <token>
 ```
 
-`latest-pack` gives Mise a read bridge to approved Dionysus content. When Mise's
-Argus callback fires, it can `POST argus-pack` with `argus_run_id` (and optional
-`mise_gallery_id`) to draft keyword-enriched captions without coupling the apps.
+`latest-pack` gives Mise a read bridge to approved Dionysus content. The bridge
+returns `share_url` only when an owner/admin has explicitly shared the pack; read
+requests never create public share links. When Mise's Argus callback fires, it can
+`POST argus-pack` with `argus_run_id` (and optional `mise_gallery_id`) to draft
+keyword-enriched captions without coupling the apps.
 
 
 
