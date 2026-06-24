@@ -327,13 +327,28 @@ def _duration_label(seconds: int | None) -> str:
     return f"{days}d {hours}h" if hours else f"{days}d"
 
 
-def queue_stats_for_org(org_id: int) -> dict:
-    row = db.one("""SELECT
+def queue_stats(org_id: int | None = None) -> dict:
+    where_sql = "WHERE org_id=?" if org_id is not None else ""
+    params: list[Any] = []
+    stale_seconds = max(int(config.JOB_STALE_SECONDS), 0)
+    if stale_seconds:
+        stale_expr = """CASE
+                            WHEN status='running'
+                             AND datetime(COALESCE(updated_at, created_at))
+                                 < datetime('now', ?)
+                            THEN 1 ELSE 0 END"""
+        params.append(f"-{stale_seconds} seconds")
+    else:
+        stale_expr = "0"
+    if org_id is not None:
+        params.append(org_id)
+    row = db.one(f"""SELECT
                         COUNT(*) AS total,
                         COALESCE(SUM(CASE WHEN status='queued' THEN 1 ELSE 0 END), 0)
                             AS queued,
                         COALESCE(SUM(CASE WHEN status='running' THEN 1 ELSE 0 END), 0)
                             AS running,
+                        COALESCE(SUM({stale_expr}), 0) AS stale_running,
                         COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END), 0)
                             AS failed,
                         COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END), 0)
@@ -350,14 +365,20 @@ def queue_stats_for_org(org_id: int) -> dict:
                             THEN 1 ELSE 0 END), 0) AS done_24h,
                         MAX(completed_at) AS last_completed_at
                      FROM jobs
-                     WHERE org_id=?""", (org_id,))
-    oldest = db.one("""SELECT id, status, created_at,
+                     {where_sql}""", tuple(params))
+    if org_id is None:
+        active_where = "WHERE status IN ('queued','running')"
+        active_params: tuple = ()
+    else:
+        active_where = "WHERE org_id=? AND status IN ('queued','running')"
+        active_params = (org_id,)
+    oldest = db.one(f"""SELECT id, status, created_at,
                                CAST((julianday('now') - julianday(created_at)) * 86400
                                     AS INTEGER) AS age_seconds
                         FROM jobs
-                        WHERE org_id=? AND status IN ('queued','running')
+                        {active_where}
                         ORDER BY created_at, id
-                        LIMIT 1""", (org_id,))
+                        LIMIT 1""", active_params)
     done_24h = int(row["done_24h"] if row else 0)
     failed_24h = int(row["failed_24h"] if row else 0)
     recent_attempts = done_24h + failed_24h
@@ -365,7 +386,10 @@ def queue_stats_for_org(org_id: int) -> dict:
     failed = int(row["failed"] if row else 0)
     queued = int(row["queued"] if row else 0)
     running = int(row["running"] if row else 0)
-    if failed:
+    stale_running = int(row["stale_running"] if row else 0)
+    if stale_running:
+        health_label = "stale"
+    elif failed:
         health_label = "needs retry"
     elif queued or running:
         health_label = "working"
@@ -376,6 +400,7 @@ def queue_stats_for_org(org_id: int) -> dict:
         "total": int(row["total"] if row else 0),
         "queued": queued,
         "running": running,
+        "stale_running": stale_running,
         "failed": failed,
         "done": int(row["done"] if row else 0),
         "done_24h": done_24h,
@@ -389,6 +414,10 @@ def queue_stats_for_org(org_id: int) -> dict:
         "last_completed_at": row["last_completed_at"] if row else None,
         "health_label": health_label,
     }
+
+
+def queue_stats_for_org(org_id: int) -> dict:
+    return queue_stats(org_id)
 
 
 def pending_count(org_id: int | None = None) -> int:

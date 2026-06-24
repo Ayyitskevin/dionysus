@@ -41,13 +41,13 @@
   <section class="band settings-band">
     <div class="section-row">
       <h2>Worker queue</h2>
-      <span class="status-pill {% if queue_stats.failed %}failed{% elif queue_stats.queued or queue_stats.running %}running{% else %}done{% endif %}">{{ queue_stats.health_label }}</span>
+      <span class="status-pill {% if queue_stats.stale_running or queue_stats.failed %}failed{% elif queue_stats.queued or queue_stats.running %}running{% else %}done{% endif %}">{{ queue_stats.health_label }}</span>
     </div>
     <div class="support-stats queue-stats">
       <article class="support-stat">
         <span>Queued</span>
         <strong>{{ queue_stats.queued }}</strong>
-        <p>{{ queue_stats.running }} running · {{ queue_stats.total }} total jobs</p>
+        <p>{{ queue_stats.running }} running{% if queue_stats.stale_running %} · {{ queue_stats.stale_running }} stale{% endif %} · {{ queue_stats.total }} total jobs</p>
       </article>
       <article class="support-stat">
         <span>Oldest active</span>

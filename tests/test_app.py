@@ -1128,6 +1128,50 @@ def test_stripe_webhook_accepts_stripe_event_objects(tmp_path, monkeypatch):
     assert sub["stripe_subscription_id"] == "sub_obj"
 
 
+def test_healthz_reports_global_queue_health(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    signup(client, drain=False)
+    org = db.one("SELECT * FROM organizations WHERE slug='blue-plate'")
+    job = db.one("SELECT * FROM jobs WHERE kind='generate_pack'")
+
+    res = client.get("/healthz")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is True
+    assert body["jobs_pending"] == 1
+    assert body["jobs_failed"] == 0
+    assert body["queue"]["queued"] == 1
+    assert body["queue"]["running"] == 0
+    assert body["queue"]["failed"] == 0
+    assert body["queue"]["health_label"] == "working"
+    assert body["queue"]["oldest_active_job_id"] == job["id"]
+
+    db.run("""UPDATE jobs
+              SET status='running',
+                  updated_at=datetime('now', '-2 hours'),
+                  created_at=datetime('now', '-2 hours')
+              WHERE id=?""", (job["id"],))
+    db.run("""INSERT INTO jobs (kind, payload, status, attempts, error, org_id)
+              VALUES (?,?,?,?,?,?)""",
+           ("generate_pack", "{}", "failed", 1, "model unavailable", org["id"]))
+    from app import config
+    monkeypatch.setattr(config, "JOB_STALE_SECONDS", 60)
+
+    res = client.get("/healthz")
+    queue = res.json()["queue"]
+    assert res.json()["jobs_pending"] == 1
+    assert res.json()["jobs_failed"] == 1
+    assert queue["running"] == 1
+    assert queue["stale_running"] == 1
+    assert queue["failed"] == 1
+    assert queue["health_label"] == "stale"
+
+    org_queue = jobs.queue_stats_for_org(org["id"])
+    assert org_queue["stale_running"] == 1
+    assert org_queue["failed"] == 1
+
+
 def test_readiness_fails_with_default_dev_config(tmp_path, monkeypatch):
     configure_tmp_db(tmp_path, monkeypatch)
     from app import config

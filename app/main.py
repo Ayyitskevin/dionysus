@@ -59,7 +59,13 @@ async def branded_errors(request: Request, exc: StarletteHTTPException):
 
 @app.get("/healthz")
 async def healthz():
-    return {"ok": True, "service": "dionysus", "jobs_pending": jobs.pending_count()}
+    return {
+        "ok": True,
+        "service": "dionysus",
+        "jobs_pending": jobs.pending_count(),
+        "jobs_failed": jobs.failed_count(),
+        "queue": jobs.queue_stats(),
+    }
 
 
 @app.get("/readiness")
