@@ -199,7 +199,7 @@
   {% for pack in packs %}
     {% set body = pack_json[pack.id] %}
     {% set share_url = pack_share_urls.get(pack.id) %}
-    <article id="pack-{{ pack.id }}" class="pack {% if shared_pack_id == pack.id %}shared-now{% endif %}">
+    <article id="pack-{{ pack.id }}" class="pack {% if shared_pack_id == pack.id or regenerated_pack_id == pack.id %}shared-now{% endif %}">
       <header>
         <div>
           <p class="eyebrow">{{ pack.recipe_name }} · {{ pack.ai_model }}</p>
@@ -243,6 +243,15 @@
         <div><h4>Exports</h4><ul>{% for x in body.exports %}<li>{{ x }}</li>{% endfor %}</ul></div>
         <div><h4>Upsells</h4><ul>{% for x in body.upsells %}<li>{{ x }}</li>{% endfor %}</ul></div>
       </div>
+      {% if can_manage_workspace %}
+      <details class="feedback-panel">
+        <summary>Regenerate with feedback</summary>
+        <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/regenerate" class="revision-form">
+          <label>Feedback <textarea name="feedback" required placeholder="Shorter captions, more premium tone, delivery-app focus"></textarea></label>
+          <button class="secondary">Generate new draft</button>
+        </form>
+      </details>
+      {% endif %}
       {% if can_manage_workspace and pack.status == "draft" %}
       <details class="revision-panel">
         <summary>Revise draft</summary>

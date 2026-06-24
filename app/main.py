@@ -14,7 +14,10 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import audit, billing, config, db, jobs, mise_hook, packs as pack_utils, plans, readiness, recipes, security
+from . import (
+    audit, billing, config, db, generator, jobs, mise_hook, packs as pack_utils,
+    plans, readiness, recipes, security,
+)
 from .render import ROOT, templates
 
 logging.basicConfig(level=logging.INFO,
@@ -413,6 +416,19 @@ def _set_auth_cookies(resp: RedirectResponse, user_id: int, slug: str) -> Redire
     return resp
 
 
+def _enforce_monthly_pack_limit(org, sub: dict | None = None) -> None:
+    sub = sub or billing.checkout_state(org)
+    limit = plans.pack_limit(sub["plan"])
+    if limit is None:
+        return
+    period = dt.date.today().strftime("%Y-%m")
+    used = db.one("""SELECT COUNT(*) AS n FROM content_packs
+                     WHERE org_id=? AND substr(created_at,1,7)=?""",
+                  (org["id"], period))["n"]
+    if used >= limit:
+        raise HTTPException(status_code=402, detail="monthly pack limit reached")
+
+
 def _first_recipe_slug(audience: str, plan: str) -> str:
     if audience == "photographer":
         return "photographer-upsell"
@@ -516,13 +532,19 @@ async def workspace(request: Request, slug: str):
     campaigns = db.all_("SELECT * FROM campaigns WHERE org_id=? ORDER BY id DESC", (org["id"],))
     packs = db.all_("""SELECT cp.*, cr.name AS recipe_name
                        FROM content_packs cp JOIN content_recipes cr ON cr.id=cp.recipe_id
-                       WHERE cp.org_id=? ORDER BY cp.created_at DESC""", (org["id"],))
+                       WHERE cp.org_id=? ORDER BY cp.created_at DESC, cp.id DESC""",
+                    (org["id"],))
     latest_pack = packs[0] if packs else None
     shared_pack_raw = request.query_params.get("shared", "")
     try:
         shared_pack_id = int(shared_pack_raw)
     except ValueError:
         shared_pack_id = 0
+    regenerated_pack_raw = request.query_params.get("regenerated", "")
+    try:
+        regenerated_pack_id = int(regenerated_pack_raw)
+    except ValueError:
+        regenerated_pack_id = 0
     sub = billing.checkout_state(org)
     current_member = _membership(user["id"], org["id"]) if user else None
     can_manage_workspace = bool(
@@ -551,6 +573,7 @@ async def workspace(request: Request, slug: str):
             for p in packs if p["share_token"]
         },
         "shared_pack_id": shared_pack_id,
+        "regenerated_pack_id": regenerated_pack_id,
         "can_manage_workspace": can_manage_workspace,
     })
 
@@ -956,14 +979,7 @@ async def generate_pack(request: Request, slug: str, campaign_id: int,
     sub = billing.checkout_state(org)
     if not plans.allowed_recipe(sub["plan"], recipe["slug"]):
         raise HTTPException(status_code=402, detail="upgrade required for this recipe")
-    limit = plans.pack_limit(sub["plan"])
-    if limit is not None:
-        period = dt.date.today().strftime("%Y-%m")
-        used = db.one("""SELECT COUNT(*) AS n FROM content_packs
-                         WHERE org_id=? AND substr(created_at,1,7)=?""",
-                      (org["id"], period))["n"]
-        if used >= limit:
-            raise HTTPException(status_code=402, detail="monthly pack limit reached")
+    _enforce_monthly_pack_limit(org, sub=sub)
     jobs.enqueue_generate(campaign_id, recipe_id, argus_run_id=argus_run_id)
     return RedirectResponse(f"/w/{slug}#packs", status_code=303)
 
@@ -1026,6 +1042,43 @@ async def revise_pack(request: Request, slug: str, pack_id: int,
             },
         })
     return RedirectResponse(f"/w/{slug}?revised={pack_id}#pack-{pack_id}", status_code=303)
+
+
+@app.post("/w/{slug}/packs/{pack_id}/regenerate")
+async def regenerate_pack(request: Request, slug: str, pack_id: int,
+                          feedback: str = Form(...)):
+    org, user, _ = _require_owner(request, slug)
+    pack = pack_utils.get_for_org(pack_id, org["id"])
+    if not pack:
+        raise HTTPException(status_code=404, detail="pack not found")
+    feedback = feedback.strip()
+    if len(feedback) < 4:
+        raise HTTPException(status_code=400, detail="feedback is required")
+    sub = billing.checkout_state(org)
+    if not plans.allowed_recipe(sub["plan"], pack["recipe_slug"]):
+        raise HTTPException(status_code=402, detail="upgrade required for this recipe")
+    _enforce_monthly_pack_limit(org, sub=sub)
+    regenerated = generator.regenerate_with_feedback(org, pack, feedback)
+    engine = regenerated["provenance"]["engine"]
+    new_pack_id = db.run("""INSERT INTO content_packs
+                            (org_id, campaign_id, recipe_id, title, body_json,
+                             ai_model, ai_draft_original)
+                            VALUES (?,?,?,?,?,?,?)""",
+                         (org["id"], pack["campaign_id"], pack["recipe_id"],
+                          regenerated["headline"], json.dumps(regenerated),
+                          engine, json.dumps(regenerated)))
+    audit.log_event(
+        org["id"], "pack.regenerated",
+        actor_user_id=audit.actor_id(user), entity_type="content_pack", entity_id=new_pack_id,
+        summary=f"Regenerated {pack['title']} into a new draft.",
+        details={
+            "source_pack_id": pack["id"],
+            "source_status": pack["status"],
+            "pack_title": regenerated["headline"],
+            "feedback": feedback,
+        })
+    return RedirectResponse(
+        f"/w/{slug}?regenerated={new_pack_id}#pack-{new_pack_id}", status_code=303)
 
 
 @app.post("/w/{slug}/packs/{pack_id}/approve")

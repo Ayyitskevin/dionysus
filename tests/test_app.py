@@ -396,6 +396,11 @@ def test_plain_members_can_draft_but_not_publish_packs(tmp_path, monkeypatch):
         },
         follow_redirects=False,
     )
+    regenerate = member_client.post(
+        f"/w/blue-plate/packs/{pack['id']}/regenerate",
+        data={"feedback": "Make it shorter."},
+        follow_redirects=False,
+    )
     unchanged = db.one("SELECT * FROM content_packs WHERE id=?", (pack["id"],))
 
     assert generated.status_code == 303
@@ -405,11 +410,13 @@ def test_plain_members_can_draft_but_not_publish_packs(tmp_path, monkeypatch):
     assert f'/w/blue-plate/packs/{pack["id"]}/share' not in page.text
     assert f'/w/blue-plate/packs/{pack["id"]}/export.md' not in page.text
     assert f'/w/blue-plate/packs/{pack["id"]}/revise' not in page.text
+    assert f'/w/blue-plate/packs/{pack["id"]}/regenerate' not in page.text
     assert "Ask an owner or admin to approve, share, or export this pack." in page.text
     assert approve.status_code == 403
     assert share.status_code == 403
     assert export.status_code == 403
     assert revise.status_code == 403
+    assert regenerate.status_code == 403
     assert unchanged["status"] == "draft"
     assert unchanged["share_token"] is None
     assert unchanged["exported_at"] is None
@@ -476,6 +483,76 @@ def test_owner_can_revise_draft_pack_before_approval(tmp_path, monkeypatch):
         follow_redirects=False,
     )
     assert blocked.status_code == 400
+
+
+def test_owner_can_regenerate_feedback_draft_without_mutating_source(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    signup(client)
+    pack = db.one("SELECT * FROM content_packs")
+    approve = client.post(f"/w/blue-plate/packs/{pack['id']}/approve", follow_redirects=False)
+    assert approve.status_code == 303
+    share = client.post(f"/w/blue-plate/packs/{pack['id']}/share", follow_redirects=False)
+    assert share.status_code == 303
+    source = db.one("SELECT * FROM content_packs WHERE id=?", (pack["id"],))
+    page = client.get("/w/blue-plate")
+    assert f'/w/blue-plate/packs/{pack["id"]}/regenerate' in page.text
+
+    regenerated = client.post(
+        f"/w/blue-plate/packs/{pack['id']}/regenerate",
+        data={
+            "feedback": (
+                "Make this shorter, more premium, and focused on DoorDash delivery."
+            )
+        },
+        follow_redirects=False,
+    )
+    new_pack = db.one("SELECT * FROM content_packs WHERE id!=? ORDER BY id DESC LIMIT 1",
+                      (pack["id"],))
+    assert regenerated.status_code == 303
+    assert regenerated.headers["location"] == (
+        f"/w/blue-plate?regenerated={new_pack['id']}#pack-{new_pack['id']}"
+    )
+
+    source_after = db.one("SELECT * FROM content_packs WHERE id=?", (pack["id"],))
+    body = json.loads(new_pack["body_json"])
+    assert new_pack["status"] == "draft"
+    assert new_pack["share_token"] is None
+    assert new_pack["title"] == "First monthly content pack feedback draft"
+    assert source_after["status"] == "approved"
+    assert source_after["share_token"] == source["share_token"]
+    assert body["provenance"]["engine"] == "dionysus-feedback-regenerate"
+    assert body["provenance"]["source_pack_id"] == pack["id"]
+    assert body["provenance"]["feedback"].startswith("Make this shorter")
+    assert body["exports"][0].startswith("delivery_apps:")
+    assert any("Elevated angle:" in caption for caption in body["captions"])
+    assert all(len(caption) <= 118 for caption in body["captions"])
+
+    event = db.one("SELECT * FROM audit_events WHERE action='pack.regenerated'")
+    assert event["entity_id"] == new_pack["id"]
+    assert "new draft" in event["summary"]
+
+
+def test_feedback_regeneration_respects_monthly_pack_limit(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    signup(client, plan="restaurant_starter")
+    pack = db.one("SELECT * FROM content_packs")
+    for note in ("Make it premium.", "Make it social."):
+        res = client.post(
+            f"/w/blue-plate/packs/{pack['id']}/regenerate",
+            data={"feedback": note},
+            follow_redirects=False,
+        )
+        assert res.status_code == 303
+
+    blocked = client.post(
+        f"/w/blue-plate/packs/{pack['id']}/regenerate",
+        data={"feedback": "Make it delivery focused."},
+        follow_redirects=False,
+    )
+    assert blocked.status_code == 402
+    assert db.one("SELECT COUNT(*) AS n FROM content_packs")["n"] == 3
 
 
 def test_member_role_update_and_revoke_remove_access(tmp_path, monkeypatch):

@@ -211,14 +211,14 @@ label { display: grid; gap: 0.4rem; font-size: 0.9rem; font-weight: 700; }
 }
 .pack-grid h4 { color: var(--blue); margin-bottom: 0.4rem; }
 .pack-grid ul, .price ul, .pack-section ul { padding-left: 1.1rem; }
-.revision-panel {
+.revision-panel, .feedback-panel {
   margin-top: 1rem;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 0.85rem;
   background: var(--paper);
 }
-.revision-panel summary {
+.revision-panel summary, .feedback-panel summary {
   cursor: pointer;
   font-weight: 900;
 }

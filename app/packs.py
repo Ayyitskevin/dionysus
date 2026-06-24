@@ -7,7 +7,7 @@ from . import db, security
 
 
 def get_for_org(pack_id: int, org_id: int):
-    return db.one("""SELECT cp.*, cr.name AS recipe_name, o.slug AS org_slug,
+    return db.one("""SELECT cp.*, cr.name AS recipe_name, cr.slug AS recipe_slug, o.slug AS org_slug,
                             o.name AS org_name, o.company, o.audience
                      FROM content_packs cp
                      JOIN content_recipes cr ON cr.id=cp.recipe_id
@@ -16,7 +16,7 @@ def get_for_org(pack_id: int, org_id: int):
 
 
 def get_by_token(token: str):
-    return db.one("""SELECT cp.*, cr.name AS recipe_name, o.slug AS org_slug,
+    return db.one("""SELECT cp.*, cr.name AS recipe_name, cr.slug AS recipe_slug, o.slug AS org_slug,
                             o.name AS org_name, o.company, o.audience
                      FROM content_packs cp
                      JOIN content_recipes cr ON cr.id=cp.recipe_id

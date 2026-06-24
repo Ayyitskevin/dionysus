@@ -98,3 +98,119 @@ def build_pack(org, campaign, recipe, *, argus_context: dict | None = None) -> d
         "argus": argus or None,
         "provenance": provenance,
     }
+
+
+def _text_list(value) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _unique(items: list[str]) -> list[str]:
+    seen = set()
+    out = []
+    for item in items:
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+
+def _shorten(value: str, limit: int = 118) -> str:
+    clean = " ".join(value.split())
+    first_sentence = clean.split(".", 1)[0].strip()
+    if first_sentence:
+        clean = first_sentence
+    if len(clean) > limit:
+        clean = f"{clean[:limit - 3].rstrip()}..."
+    return clean
+
+
+def regenerate_with_feedback(org, source_pack, feedback: str) -> dict:
+    """Create a new draft pack body from an existing pack plus owner feedback.
+
+    This remains deterministic until a hosted model is wired in; the route treats
+    the output as a draft and keeps the source pack untouched.
+    """
+    feedback = " ".join(feedback.split())
+    lower = feedback.lower()
+    source = json.loads(source_pack["body_json"])
+    shot_list = _text_list(source.get("shot_list"))
+    captions = _text_list(source.get("captions"))
+    exports = _text_list(source.get("exports"))
+    upsells = _text_list(source.get("upsells"))
+    strategy = str(source.get("strategy") or "").strip()
+    if not captions:
+        captions = [f"{org['name']} has a clear campaign angle ready to refine."]
+    if not shot_list:
+        shot_list = ["Hero frame with clear subject, light, and client-facing purpose"]
+
+    premium = any(word in lower for word in (
+        "premium", "upscale", "elevated", "elegant", "luxury", "polished"))
+    delivery = any(word in lower for word in (
+        "delivery", "doordash", "uber eats", "ubereats", "ordering", "takeout"))
+    short = any(word in lower for word in (
+        "short", "shorter", "concise", "tight", "tighter"))
+    social = any(word in lower for word in (
+        "social", "instagram", "reel", "reels", "tiktok"))
+    reservation = any(word in lower for word in (
+        "reservation", "reserve", "book", "tables", "table"))
+
+    strategy_notes = [strategy] if strategy else []
+    if premium:
+        strategy_notes.append(
+            "Elevated direction: make the language premium, chef-led, and specific.")
+        captions = [f"Elevated angle: {caption}" for caption in captions]
+        upsells.insert(
+            0,
+            "Offer a premium usage bundle for web, paid social, and reservation campaigns.",
+        )
+    if delivery:
+        strategy_notes.append(
+            "Delivery direction: prioritize ordering-platform clarity and item-level conversion.")
+        exports = [
+            "delivery_apps: concise hero copy, modifier notes, and ordering CTA",
+        ] + [item for item in exports if not item.lower().startswith("delivery_apps:")]
+        captions.append(
+            "Delivery angle: lead with the dish benefit, then send guests straight to order.")
+        shot_list.append(
+            "Delivery crop: tight item frame with clean negative space for app menus")
+    if social:
+        strategy_notes.append("Social direction: make the first frame and caption hook faster.")
+        exports = [
+            "reels: vertical opener, hook caption, and save/share CTA",
+        ] + [item for item in exports if not item.lower().startswith("reels:")]
+        shot_list.append("Vertical reel opener with motion, hands, or sauce pull")
+    if reservation:
+        strategy_notes.append("Reservation direction: move guests toward booking a table.")
+        captions.append("Reserve this week's table around the dish people will remember.")
+        exports.append("reservation_cta: booking prompt for email, social, and website")
+    if not any((premium, delivery, short, social, reservation)):
+        captions[0] = f"{captions[0]} Direction: {feedback}."
+        exports.insert(0, f"client_feedback: {feedback}")
+
+    if short:
+        captions = [_shorten(caption) for caption in captions[:3]]
+        strategy_notes.append("Concise direction: keep captions direct and skimmable.")
+
+    provenance = dict(source.get("provenance") or {})
+    source_engine = provenance.get("engine")
+    provenance.update({
+        "engine": "dionysus-feedback-regenerate",
+        "source_engine": source_engine,
+        "source_pack_id": source_pack["id"],
+        "feedback": feedback,
+    })
+    title = f"{source_pack['title']} feedback draft"
+    return {
+        "headline": title,
+        "strategy": " ".join(strategy_notes + [f"Feedback direction: {feedback}."]),
+        "shot_list": _unique(shot_list),
+        "captions": _unique(captions),
+        "exports": _unique(exports),
+        "upsells": _unique(upsells),
+        "argus": source.get("argus"),
+        "provenance": provenance,
+    }
