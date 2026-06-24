@@ -1208,6 +1208,55 @@ async def latest_pack_for_mise(slug: str, include_drafts: bool = False):
     return {"matched": True, "org": slug, "pack": _pack_api_payload(pack)}
 
 
+@app.post("/api/mise/organizations/{slug}/print-pitch",
+          dependencies=[Depends(security.require_mise_token)])
+async def mise_print_pitch(slug: str, request: Request):
+    """Plutus hand-off — enrich client print upsell email copy from bundle rationale."""
+    org = _org_by_slug(slug)
+    if not org:
+        raise HTTPException(status_code=404, detail="organization not found")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="json body required")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="json object required")
+    gallery_name = body.get("gallery_name")
+    if not isinstance(gallery_name, str) or not gallery_name.strip():
+        raise HTTPException(status_code=400, detail="gallery_name required")
+    bundles = body.get("bundles")
+    if not isinstance(bundles, list):
+        raise HTTPException(status_code=400, detail="bundles must be a list")
+    try:
+        photo_count = int(body.get("photo_count") or 0)
+        estimated_total_cents = int(body.get("estimated_total_cents") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="photo_count and estimated_total_cents required")
+    argus_run_id = body.get("argus_run_id")
+    if argus_run_id is not None:
+        try:
+            argus_run_id = int(argus_run_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="argus_run_id must be an integer")
+    gallery_theme = body.get("gallery_theme")
+    if gallery_theme is not None and not isinstance(gallery_theme, str):
+        raise HTTPException(status_code=400, detail="gallery_theme must be a string")
+    from . import print_pitch
+
+    return {
+        "ok": True,
+        "org": slug,
+        **print_pitch.build_print_pitch(
+            gallery_name=gallery_name.strip(),
+            bundles=bundles,
+            photo_count=photo_count,
+            estimated_total_cents=estimated_total_cents,
+            gallery_theme=(gallery_theme or "").strip() or None,
+            argus_run_id=argus_run_id,
+        ),
+    }
+
+
 @app.post("/api/mise/organizations/{slug}/argus-pack",
           dependencies=[Depends(security.require_mise_token)])
 async def mise_argus_pack_hook(slug: str, request: Request):
