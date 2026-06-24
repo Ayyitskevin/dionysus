@@ -9,7 +9,7 @@ os.environ["DIONYSUS_DATA_DIR"] = "/tmp/dionysus-test-data"
 os.environ["DIONYSUS_SECRET_KEY"] = "test-secret"
 os.environ["DIONYSUS_MISE_IMPORT_TOKEN"] = "mise-test"
 
-from app import db  # noqa: E402
+from app import db, security  # noqa: E402
 from app.main import app  # noqa: E402
 
 
@@ -140,6 +140,32 @@ def test_workspace_redirects_anonymous_to_login_next(tmp_path, monkeypatch):
     res = anon.get("/w/blue-plate", follow_redirects=False)
     assert res.status_code == 303
     assert res.headers["location"] == "/login?next=%2Fw%2Fblue-plate"
+
+
+def test_workspace_cookie_without_user_cookie_is_not_authorization(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    signup(client)
+    workspace_cookie = security.workspace_cookie("blue-plate")
+    cookie_header = f"{security.WORKSPACE_COOKIE}={workspace_cookie}"
+
+    stale = TestClient(app)
+    page = stale.get(
+        "/w/blue-plate",
+        headers={"Cookie": cookie_header},
+        follow_redirects=False,
+    )
+    mutation = stale.post(
+        "/w/blue-plate/menu",
+        data={"name": "Unauthorized dish"},
+        headers={"Cookie": cookie_header},
+        follow_redirects=False,
+    )
+
+    assert page.status_code == 303
+    assert page.headers["location"] == "/login?next=%2Fw%2Fblue-plate"
+    assert mutation.status_code == 403
+    assert db.one("SELECT * FROM menu_items WHERE name='Unauthorized dish'") is None
 
 
 def test_login_honors_safe_workspace_next(tmp_path, monkeypatch):
