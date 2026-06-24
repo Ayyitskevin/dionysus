@@ -518,6 +518,9 @@ def test_owner_can_regenerate_feedback_draft_without_mutating_source(tmp_path, m
     body = json.loads(new_pack["body_json"])
     assert new_pack["status"] == "draft"
     assert new_pack["share_token"] is None
+    assert new_pack["source_pack_id"] == pack["id"]
+    assert new_pack["revision_note"].startswith("Make this shorter")
+    assert new_pack["archived_at"] is None
     assert new_pack["title"] == "First monthly content pack feedback draft"
     assert source_after["status"] == "approved"
     assert source_after["share_token"] == source["share_token"]
@@ -531,6 +534,78 @@ def test_owner_can_regenerate_feedback_draft_without_mutating_source(tmp_path, m
     event = db.one("SELECT * FROM audit_events WHERE action='pack.regenerated'")
     assert event["entity_id"] == new_pack["id"]
     assert "new draft" in event["summary"]
+
+    refreshed = client.get("/w/blue-plate")
+    assert "Regenerated from First monthly content pack" in refreshed.text
+    assert "Feedback: Make this shorter" in refreshed.text
+
+
+def test_archived_drafts_are_hidden_from_workspace_and_mise_by_default(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    signup(client)
+    pack = db.one("SELECT * FROM content_packs")
+
+    archive = client.post(f"/w/blue-plate/packs/{pack['id']}/archive", follow_redirects=False)
+    assert archive.status_code == 303
+    assert archive.headers["location"] == f"/w/blue-plate?archived=1#pack-{pack['id']}"
+    archived = db.one("SELECT * FROM content_packs WHERE id=?", (pack["id"],))
+    assert archived["archived_at"]
+
+    page = client.get("/w/blue-plate")
+    assert page.status_code == 200
+    assert f'id="pack-{pack["id"]}"' not in page.text
+    assert f'/w/blue-plate/packs/{pack["id"]}/regenerate' not in page.text
+    assert "Show archived (1)" in page.text
+
+    archived_page = client.get("/w/blue-plate?archived=1")
+    assert archived_page.status_code == 200
+    assert "First monthly content pack" in archived_page.text
+    assert "archived" in archived_page.text
+    assert f'/w/blue-plate/packs/{pack["id"]}/approve' not in archived_page.text
+    assert f'/w/blue-plate/packs/{pack["id"]}/regenerate' not in archived_page.text
+
+    mise = client.get(
+        "/api/mise/organizations/blue-plate/packs?include_drafts=true",
+        headers={"Authorization": "Bearer mise-test"},
+    )
+    assert mise.status_code == 200
+    assert mise.json()["packs"] == []
+
+    revise = client.post(
+        f"/w/blue-plate/packs/{pack['id']}/revise",
+        data={
+            "title": "Archived rewrite",
+            "strategy": "Nope",
+            "shot_list": "Nope",
+        },
+        follow_redirects=False,
+    )
+    regenerate = client.post(
+        f"/w/blue-plate/packs/{pack['id']}/regenerate",
+        data={"feedback": "Make this premium."},
+        follow_redirects=False,
+    )
+    approve = client.post(f"/w/blue-plate/packs/{pack['id']}/approve", follow_redirects=False)
+    assert revise.status_code == 400
+    assert regenerate.status_code == 400
+    assert approve.status_code == 400
+
+    event = db.one("SELECT * FROM audit_events WHERE action='pack.archived'")
+    assert event["entity_id"] == pack["id"]
+
+
+def test_approved_packs_cannot_be_archived(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    signup(client)
+    pack = db.one("SELECT * FROM content_packs")
+    approve = client.post(f"/w/blue-plate/packs/{pack['id']}/approve", follow_redirects=False)
+    archive = client.post(f"/w/blue-plate/packs/{pack['id']}/archive", follow_redirects=False)
+    assert approve.status_code == 303
+    assert archive.status_code == 400
+    assert db.one("SELECT archived_at FROM content_packs WHERE id=?",
+                  (pack["id"],))["archived_at"] is None
 
 
 def test_feedback_regeneration_respects_monthly_pack_limit(tmp_path, monkeypatch):
@@ -1133,7 +1208,7 @@ def test_cli_backup_creates_private_verified_snapshot(tmp_path, monkeypatch, cap
     assert cli.main(["backup", str(destination)]) == 0
     output = capsys.readouterr().out
     assert "backup\t" in output
-    assert "restore_check\tok\tintegrity=ok\tmigrations=5" in output
+    assert "restore_check\tok\tintegrity=ok\tmigrations=6" in output
 
     snapshots = list(destination.glob("dionysus-*.db"))
     assert len(snapshots) == 1
@@ -1150,7 +1225,7 @@ def test_cli_backup_creates_private_verified_snapshot(tmp_path, monkeypatch, cap
 
     assert cli.main(["verify-backup", str(snapshots[0])]) == 0
     verify_output = capsys.readouterr().out
-    assert "verify\tok\tintegrity=ok\tmigrations=5" in verify_output
+    assert "verify\tok\tintegrity=ok\tmigrations=6" in verify_output
 
 
 def test_workspace_surfaces_upgrade_prompt_for_locked_recipe(tmp_path, monkeypatch):

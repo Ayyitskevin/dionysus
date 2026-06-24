@@ -195,7 +195,16 @@
 </section>
 
 <section id="packs" class="band">
-  <h2>Generated packs</h2>
+  <div class="section-row">
+    <h2>Generated packs</h2>
+    {% if archived_count %}
+      {% if show_archived %}
+      <a class="button ghost" href="/w/{{ org.slug }}#packs">Hide archived</a>
+      {% else %}
+      <a class="button ghost" href="/w/{{ org.slug }}?archived=1#packs">Show archived ({{ archived_count }})</a>
+      {% endif %}
+    {% endif %}
+  </div>
   {% for pack in packs %}
     {% set body = pack_json[pack.id] %}
     {% set share_url = pack_share_urls.get(pack.id) %}
@@ -204,12 +213,19 @@
         <div>
           <p class="eyebrow">{{ pack.recipe_name }} · {{ pack.ai_model }}</p>
           <h3>{{ pack.title }}</h3>
+          {% if pack.source_pack_id %}
+          <p class="muted">Regenerated from {{ pack.source_pack_title or ("pack #" ~ pack.source_pack_id) }}</p>
+          {% endif %}
+          {% if pack.revision_note %}
+          <p class="muted">Feedback: {{ pack.revision_note }}</p>
+          {% endif %}
         </div>
         <div class="pack-actions">
-          <span>{{ pack.status }}</span>
-          {% if can_manage_workspace %}
+          <span>{% if pack.archived_at %}archived{% else %}{{ pack.status }}{% endif %}</span>
+          {% if can_manage_workspace and not pack.archived_at %}
             {% if pack.status == "draft" %}
             <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/approve"><button class="ghost">Approve</button></form>
+            <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/archive"><button class="ghost">Archive</button></form>
             {% else %}
               {% if share_url %}
               <a class="button" href="{{ share_url }}">Open share</a>
@@ -243,7 +259,7 @@
         <div><h4>Exports</h4><ul>{% for x in body.exports %}<li>{{ x }}</li>{% endfor %}</ul></div>
         <div><h4>Upsells</h4><ul>{% for x in body.upsells %}<li>{{ x }}</li>{% endfor %}</ul></div>
       </div>
-      {% if can_manage_workspace %}
+      {% if can_manage_workspace and not pack.archived_at %}
       <details class="feedback-panel">
         <summary>Regenerate with feedback</summary>
         <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/regenerate" class="revision-form">
@@ -252,7 +268,7 @@
         </form>
       </details>
       {% endif %}
-      {% if can_manage_workspace and pack.status == "draft" %}
+      {% if can_manage_workspace and not pack.archived_at and pack.status == "draft" %}
       <details class="revision-panel">
         <summary>Revise draft</summary>
         <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/revise" class="revision-form">

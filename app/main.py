@@ -530,11 +530,24 @@ async def workspace(request: Request, slug: str):
     org, user = _require_workspace(request, slug)
     menu = db.all_("SELECT * FROM menu_items WHERE org_id=? ORDER BY id DESC", (org["id"],))
     campaigns = db.all_("SELECT * FROM campaigns WHERE org_id=? ORDER BY id DESC", (org["id"],))
-    packs = db.all_("""SELECT cp.*, cr.name AS recipe_name
-                       FROM content_packs cp JOIN content_recipes cr ON cr.id=cp.recipe_id
-                       WHERE cp.org_id=? ORDER BY cp.created_at DESC, cp.id DESC""",
+    show_archived = request.query_params.get("archived", "") == "1"
+    pack_where = "cp.org_id=?"
+    if not show_archived:
+        pack_where += " AND cp.archived_at IS NULL"
+    packs = db.all_(f"""SELECT cp.*, cr.name AS recipe_name,
+                               sp.title AS source_pack_title
+                        FROM content_packs cp
+                        JOIN content_recipes cr ON cr.id=cp.recipe_id
+                        LEFT JOIN content_packs sp ON sp.id=cp.source_pack_id
+                        WHERE {pack_where}
+                        ORDER BY CASE
+                                   WHEN cp.archived_at IS NOT NULL THEN 2
+                                   WHEN cp.status='draft' THEN 0
+                                   ELSE 1
+                                 END,
+                                 cp.created_at DESC, cp.id DESC""",
                     (org["id"],))
-    latest_pack = packs[0] if packs else None
+    latest_pack = next((p for p in packs if not p["archived_at"]), None)
     shared_pack_raw = request.query_params.get("shared", "")
     try:
         shared_pack_id = int(shared_pack_raw)
@@ -545,6 +558,9 @@ async def workspace(request: Request, slug: str):
         regenerated_pack_id = int(regenerated_pack_raw)
     except ValueError:
         regenerated_pack_id = 0
+    archived_count = db.one("""SELECT COUNT(*) AS n FROM content_packs
+                              WHERE org_id=? AND archived_at IS NOT NULL""",
+                            (org["id"],))["n"]
     sub = billing.checkout_state(org)
     current_member = _membership(user["id"], org["id"]) if user else None
     can_manage_workspace = bool(
@@ -564,6 +580,7 @@ async def workspace(request: Request, slug: str):
         "org": org, "user": user, "menu": menu, "campaigns": campaigns,
         "packs": packs, "latest_pack": latest_pack, "recipes": active_recipes,
         "subscription": sub, "pack_limit": limit, "pack_used": used,
+        "show_archived": show_archived, "archived_count": archived_count,
         "limit_upgrade_plan": limit_upgrade_plan,
         "upgrade_recipes": upgrade_recipes,
         "plans_by_key": plans.PLANS,
@@ -1000,6 +1017,11 @@ def _require_publishable_pack(pack) -> None:
         raise HTTPException(status_code=400, detail="approve pack before publishing")
 
 
+def _require_active_pack(pack) -> None:
+    if pack["archived_at"]:
+        raise HTTPException(status_code=400, detail="archived packs are read-only")
+
+
 @app.post("/w/{slug}/packs/{pack_id}/revise")
 async def revise_pack(request: Request, slug: str, pack_id: int,
                       title: str = Form(...), strategy: str = Form(...),
@@ -1009,6 +1031,7 @@ async def revise_pack(request: Request, slug: str, pack_id: int,
     pack = pack_utils.get_for_org(pack_id, org["id"])
     if not pack:
         raise HTTPException(status_code=404, detail="pack not found")
+    _require_active_pack(pack)
     if pack["status"] != "draft":
         raise HTTPException(status_code=400, detail="only draft packs can be revised")
     title = title.strip()
@@ -1051,6 +1074,7 @@ async def regenerate_pack(request: Request, slug: str, pack_id: int,
     pack = pack_utils.get_for_org(pack_id, org["id"])
     if not pack:
         raise HTTPException(status_code=404, detail="pack not found")
+    _require_active_pack(pack)
     feedback = feedback.strip()
     if len(feedback) < 4:
         raise HTTPException(status_code=400, detail="feedback is required")
@@ -1062,11 +1086,12 @@ async def regenerate_pack(request: Request, slug: str, pack_id: int,
     engine = regenerated["provenance"]["engine"]
     new_pack_id = db.run("""INSERT INTO content_packs
                             (org_id, campaign_id, recipe_id, title, body_json,
-                             ai_model, ai_draft_original)
-                            VALUES (?,?,?,?,?,?,?)""",
+                             ai_model, ai_draft_original, source_pack_id,
+                             revision_note)
+                            VALUES (?,?,?,?,?,?,?,?,?)""",
                          (org["id"], pack["campaign_id"], pack["recipe_id"],
                           regenerated["headline"], json.dumps(regenerated),
-                          engine, json.dumps(regenerated)))
+                          engine, json.dumps(regenerated), pack["id"], feedback))
     audit.log_event(
         org["id"], "pack.regenerated",
         actor_user_id=audit.actor_id(user), entity_type="content_pack", entity_id=new_pack_id,
@@ -1081,12 +1106,37 @@ async def regenerate_pack(request: Request, slug: str, pack_id: int,
         f"/w/{slug}?regenerated={new_pack_id}#pack-{new_pack_id}", status_code=303)
 
 
+@app.post("/w/{slug}/packs/{pack_id}/archive")
+async def archive_pack(request: Request, slug: str, pack_id: int):
+    org, user, _ = _require_owner(request, slug)
+    pack = pack_utils.get_for_org(pack_id, org["id"])
+    if not pack:
+        raise HTTPException(status_code=404, detail="pack not found")
+    if pack["archived_at"]:
+        return RedirectResponse(f"/w/{slug}?archived=1#pack-{pack_id}", status_code=303)
+    if pack["status"] != "draft":
+        raise HTTPException(status_code=400, detail="only draft packs can be archived")
+    db.run("""UPDATE content_packs
+              SET archived_at=datetime('now'), updated_at=datetime('now')
+              WHERE id=?""", (pack_id,))
+    audit.log_event(
+        org["id"], "pack.archived",
+        actor_user_id=audit.actor_id(user), entity_type="content_pack", entity_id=pack_id,
+        summary=f"Archived draft pack: {pack['title']}.",
+        details={
+            "pack_title": pack["title"],
+            "source_pack_id": pack["source_pack_id"],
+        })
+    return RedirectResponse(f"/w/{slug}?archived=1#pack-{pack_id}", status_code=303)
+
+
 @app.post("/w/{slug}/packs/{pack_id}/approve")
 async def approve_pack(request: Request, slug: str, pack_id: int):
     org, user, _ = _require_owner(request, slug)
     pack = pack_utils.get_for_org(pack_id, org["id"])
     if not pack:
         raise HTTPException(status_code=404, detail="pack not found")
+    _require_active_pack(pack)
     db.run("""UPDATE content_packs SET status='approved', approved_at=datetime('now'),
               updated_at=datetime('now') WHERE id=?""", (pack_id,))
     audit.log_event(
@@ -1103,6 +1153,7 @@ async def share_pack(request: Request, slug: str, pack_id: int):
     pack = pack_utils.get_for_org(pack_id, org["id"])
     if not pack:
         raise HTTPException(status_code=404, detail="pack not found")
+    _require_active_pack(pack)
     _require_publishable_pack(pack)
     had_token = bool(pack["share_token"])
     token = pack_utils.ensure_share_token(pack_id)
@@ -1148,6 +1199,7 @@ async def export_pack(request: Request, slug: str, pack_id: int, fmt: str):
     pack = pack_utils.get_for_org(pack_id, org["id"])
     if not pack:
         raise HTTPException(status_code=404, detail="pack not found")
+    _require_active_pack(pack)
     _require_publishable_pack(pack)
     resp = _export_response(pack, fmt)
     audit.log_event(
@@ -1272,6 +1324,9 @@ def _pack_api_payload(pack) -> dict:
         "approved_at": pack["approved_at"],
         "exported_at": pack["exported_at"],
         "share_url": share_url,
+        "source_pack_id": pack["source_pack_id"],
+        "revision_note": pack["revision_note"],
+        "archived_at": pack["archived_at"],
         "markdown": pack_utils.markdown(pack),
         "body": pack_utils.body(pack),
     }
@@ -1281,7 +1336,7 @@ def _pack_api_payload(pack) -> dict:
          dependencies=[Depends(security.require_mise_token)])
 async def packs_for_mise(slug: str, include_drafts: bool = False):
     org = _org_by_slug(slug)
-    where = "cp.org_id=?"
+    where = "cp.org_id=? AND cp.archived_at IS NULL"
     params: list = [org["id"]]
     if not include_drafts:
         where += " AND cp.status IN ('approved','exported')"
@@ -1305,7 +1360,7 @@ async def packs_for_mise(slug: str, include_drafts: bool = False):
          dependencies=[Depends(security.require_mise_token)])
 async def latest_pack_for_mise(slug: str, include_drafts: bool = False):
     org = _org_by_slug(slug)
-    where = "cp.org_id=?"
+    where = "cp.org_id=? AND cp.archived_at IS NULL"
     params: list = [org["id"]]
     if not include_drafts:
         where += " AND cp.status IN ('approved','exported')"
