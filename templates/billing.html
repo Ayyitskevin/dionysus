@@ -20,7 +20,7 @@
     <strong>{{ subscription.plan_meta.price_cents|money }}/mo</strong>
     <p>Status: {{ subscription.status }}</p>
     {% if subscription.configured %}
-      <form method="post" action="/w/{{ org.slug }}/billing/checkout">
+      <form method="post" action="/w/{{ org.slug }}/billing/checkout">{{ csrf_input(request) }}
         <button>Open Stripe checkout</button>
       </form>
     {% else %}
@@ -42,7 +42,7 @@
         {% if plan.key == subscription.plan %}
           <span class="plan-badge">Current plan</span>
         {% else %}
-          <form method="post" action="/w/{{ org.slug }}/billing/plan">
+          <form method="post" action="/w/{{ org.slug }}/billing/plan">{{ csrf_input(request) }}
             <input type="hidden" name="plan" value="{{ plan.key }}">
             {% if subscription.configured %}
               <button name="checkout" value="1">Upgrade in Stripe</button>

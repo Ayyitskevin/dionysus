@@ -35,6 +35,39 @@ app = FastAPI(title="Dionysus", version="0.2.0", docs_url=None,
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 
+def _csrf_protected_path(path: str) -> bool:
+    return path == "/logout" or path.startswith("/w/")
+
+
+@app.middleware("http")
+async def csrf_protection(request: Request, call_next):
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and _csrf_protected_path(
+        request.url.path
+    ):
+        submitted = request.headers.get(security.CSRF_HEADER)
+        if not submitted:
+            try:
+                form = await request.form()
+                submitted = str(form.get(security.CSRF_FIELD) or "")
+            except Exception:
+                submitted = ""
+        if not security.verify_csrf(request, submitted):
+            return PlainTextResponse("csrf validation failed", status_code=403)
+    resp = await call_next(request)
+    csrf_token = getattr(request.state, "csrf_token", "")
+    if csrf_token:
+        resp.set_cookie(
+            security.CSRF_COOKIE,
+            csrf_token,
+            max_age=60 * 60 * 24 * 90,
+            httponly=True,
+            samesite="lax",
+            path="/",
+            secure=config.COOKIE_SECURE,
+        )
+    return resp
+
+
 @app.middleware("http")
 async def common_headers(request: Request, call_next):
     resp = await call_next(request)

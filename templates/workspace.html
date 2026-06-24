@@ -15,6 +15,7 @@
   const summary = row.querySelector("[data-job-summary]");
   const statusPill = row.querySelector("[data-job-status]");
   const actions = row.querySelector("[data-job-actions]");
+  const csrfToken = jobsSection.dataset.csrfToken || "";
 
   function setText(node, value) {
     if (node) node.textContent = value;
@@ -40,6 +41,13 @@
     form.method = "post";
     form.action = job.retry_url;
     form.dataset.jobRetry = "1";
+    if (csrfToken) {
+      const csrf = document.createElement("input");
+      csrf.type = "hidden";
+      csrf.name = "csrf_token";
+      csrf.value = csrfToken;
+      form.appendChild(csrf);
+    }
     const button = document.createElement("button");
     button.className = "secondary";
     button.textContent = "Retry";
@@ -102,7 +110,7 @@
     <a class="button ghost" href="/w/{{ org.slug }}/support">Support</a>
     {% endif %}
     {% if user %}
-    <form method="post" action="/logout"><button class="ghost">Log out</button></form>
+    <form method="post" action="/logout">{{ csrf_input(request) }}<button class="ghost">Log out</button></form>
     {% endif %}
   </div>
 </section>
@@ -181,12 +189,12 @@
       <div class="first-actions">
         {% if can_manage_workspace %}
           {% if latest_pack.status == "draft" %}
-          <form method="post" action="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/approve"><button>Approve pack</button></form>
+          <form method="post" action="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/approve">{{ csrf_input(request) }}<button>Approve pack</button></form>
           {% else %}
             {% if latest_share_url %}
             <a class="button secondary" href="{{ latest_share_url }}">Open share page</a>
             {% else %}
-            <form method="post" action="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/share"><button class="secondary">Create share link</button></form>
+            <form method="post" action="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/share">{{ csrf_input(request) }}<button class="secondary">Create share link</button></form>
             {% endif %}
             <a class="button ghost" href="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/export.md">Export Markdown</a>
             <a class="button ghost" href="/w/{{ org.slug }}/packs/{{ latest_pack.id }}/export.txt">Copy text</a>
@@ -205,7 +213,7 @@
 {% endif %}
 
 <section class="columns">
-  <form method="post" action="/w/{{ org.slug }}/profile" class="panel">
+  <form method="post" action="/w/{{ org.slug }}/profile" class="panel">{{ csrf_input(request) }}
     <h2>Positioning</h2>
     <label>Market <input name="market" value="{{ org.market or '' }}" placeholder="Asheville, Charlotte, Raleigh"></label>
     <label>Service mix <input name="service_mix" value="{{ org.service_mix or '' }}" placeholder="dine-in, delivery, catering"></label>
@@ -213,7 +221,7 @@
     <button>Save positioning</button>
   </form>
 
-  <form method="post" action="/w/{{ org.slug }}/menu" class="panel">
+  <form method="post" action="/w/{{ org.slug }}/menu" class="panel">{{ csrf_input(request) }}
     <h2>Add an input</h2>
     <label>Name <input name="name" required placeholder="Spring agnolotti"></label>
     <label>Category <input name="category" placeholder="dish, drink, room, client target"></label>
@@ -221,7 +229,7 @@
     <button>Add input</button>
   </form>
 
-  <form method="post" action="/w/{{ org.slug }}/campaigns" class="panel">
+  <form method="post" action="/w/{{ org.slug }}/campaigns" class="panel">{{ csrf_input(request) }}
     <h2>Create a campaign</h2>
     <label>Title <input name="title" required placeholder="June menu launch"></label>
     <label>Goal <textarea name="goal" placeholder="sell weekend reservations, promote delivery, pitch monthly client"></textarea></label>
@@ -240,7 +248,7 @@
         <p>{{ campaign.goal or "No goal set" }} · {{ campaign.status }}</p>
       </div>
       <div class="campaign-actions">
-        <form method="post" action="/w/{{ org.slug }}/campaigns/{{ campaign.id }}/generate">
+        <form method="post" action="/w/{{ org.slug }}/campaigns/{{ campaign.id }}/generate">{{ csrf_input(request) }}
           <select name="recipe_id">
             {% for recipe in recipes %}
               {% if recipe.audience in ("both", org.audience) and not upgrade_recipes[recipe.id] %}
@@ -281,7 +289,7 @@
 </section>
 
 {% if job_rows %}
-<section id="jobs" class="band" data-job-focus-id="{{ job_focus_id }}">
+<section id="jobs" class="band" data-job-focus-id="{{ job_focus_id }}" data-csrf-token="{{ csrf_token(request) }}">
   <div class="section-row">
     <h2>Generation jobs</h2>
     <a class="small-link" href="/w/{{ org.slug }}/support">Open support</a>
@@ -299,7 +307,7 @@
         <a class="button ghost" data-job-result href="/w/{{ org.slug }}?result={{ job.result_pack_id }}#pack-{{ job.result_pack_id }}">Open result</a>
         {% endif %}
         {% if can_manage_workspace and job.status == "failed" %}
-        <form method="post" action="/w/{{ org.slug }}/jobs/{{ job.id }}/retry" data-job-retry><button class="secondary">Retry</button></form>
+        <form method="post" action="/w/{{ org.slug }}/jobs/{{ job.id }}/retry" data-job-retry>{{ csrf_input(request) }}<button class="secondary">Retry</button></form>
         {% endif %}
       </div>
     </article>
@@ -338,13 +346,13 @@
           <span>{% if pack.archived_at %}archived{% else %}{{ pack.status }}{% endif %}</span>
           {% if can_manage_workspace and not pack.archived_at %}
             {% if pack.status == "draft" %}
-            <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/approve"><button class="ghost">Approve</button></form>
-            <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/archive"><button class="ghost">Archive</button></form>
+            <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/approve">{{ csrf_input(request) }}<button class="ghost">Approve</button></form>
+            <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/archive">{{ csrf_input(request) }}<button class="ghost">Archive</button></form>
             {% else %}
               {% if share_url %}
               <a class="button" href="{{ share_url }}">Open share</a>
               {% else %}
-              <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/share"><button>Share</button></form>
+              <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/share">{{ csrf_input(request) }}<button>Share</button></form>
               {% endif %}
               <a class="button secondary" href="/w/{{ org.slug }}/packs/{{ pack.id }}/export.md">Markdown</a>
               <a class="button secondary" href="/w/{{ org.slug }}/packs/{{ pack.id }}/export.txt">Text</a>
@@ -376,7 +384,7 @@
       {% if can_manage_workspace and not pack.archived_at %}
       <details class="feedback-panel">
         <summary>Regenerate with feedback</summary>
-        <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/regenerate" class="revision-form">
+        <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/regenerate" class="revision-form">{{ csrf_input(request) }}
           <label>Feedback <textarea name="feedback" required placeholder="Shorter captions, more premium tone, delivery-app focus"></textarea></label>
           <button class="secondary">Generate new draft</button>
         </form>
@@ -385,7 +393,7 @@
       {% if can_manage_workspace and not pack.archived_at and pack.status == "draft" %}
       <details class="revision-panel">
         <summary>Revise draft</summary>
-        <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/revise" class="revision-form">
+        <form method="post" action="/w/{{ org.slug }}/packs/{{ pack.id }}/revise" class="revision-form">{{ csrf_input(request) }}
           <label>Title <input name="title" required value="{{ pack.title }}"></label>
           <label>Strategy <textarea name="strategy" required>{{ body.strategy }}</textarea></label>
           <div class="revision-grid">

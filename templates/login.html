@@ -2,7 +2,7 @@
 {% block title %}Log in · Dionysus{% endblock %}
 {% block content %}
 <section class="auth-page">
-  <form class="signup" method="post" action="/login">
+  <form class="signup" method="post" action="/login">{{ csrf_input(request) }}
     <h1>Log in</h1>
     {% if next %}<p class="muted">Log in to continue to your workspace.</p>{% endif %}
     {% if error %}<p class="error">{{ error }}</p>{% endif %}

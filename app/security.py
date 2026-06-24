@@ -16,6 +16,9 @@ _BASE62 = string.ascii_letters + string.digits
 _SLUG_SAFE = re.compile(r"[^a-z0-9]+")
 WORKSPACE_COOKIE = "dionysus_workspace"
 USER_COOKIE = "dionysus_user"
+CSRF_COOKIE = "dionysus_csrf"
+CSRF_FIELD = "csrf_token"
+CSRF_HEADER = "x-csrf-token"
 
 
 def _serializer() -> URLSafeTimedSerializer:
@@ -48,6 +51,33 @@ def workspace_cookie(slug: str) -> str:
 
 def user_cookie(user_id: int) -> str:
     return sign(f"user:{user_id}")
+
+
+def _valid_csrf_token(token: str | None) -> bool:
+    if not token:
+        return False
+    unsigned = unsign(token)
+    return bool(unsigned and unsigned.startswith("csrf:"))
+
+
+def csrf_token_for_request(request: Request) -> str:
+    token = getattr(request.state, "csrf_token", "")
+    if _valid_csrf_token(token):
+        return token
+    cookie_token = request.cookies.get(CSRF_COOKIE)
+    if _valid_csrf_token(cookie_token):
+        token = cookie_token
+    else:
+        token = sign(f"csrf:{new_token(32)}")
+    request.state.csrf_token = token
+    return token
+
+
+def verify_csrf(request: Request, submitted_token: str | None) -> bool:
+    cookie_token = request.cookies.get(CSRF_COOKIE)
+    if not _valid_csrf_token(cookie_token) or not _valid_csrf_token(submitted_token):
+        return False
+    return secrets.compare_digest(cookie_token, submitted_token or "")
 
 
 def user_id_from_request(request: Request) -> int | None:

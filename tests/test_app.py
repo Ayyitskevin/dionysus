@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sqlite3
 import stat
 
@@ -11,6 +12,21 @@ os.environ["DIONYSUS_MISE_IMPORT_TOKEN"] = "mise-test"
 
 from app import db, generator, jobs, security  # noqa: E402
 from app.main import app  # noqa: E402
+
+
+CSRF_RE = re.compile(r'name="csrf_token" value="([^"]+)"')
+
+
+def prime_csrf(client, path: str = "/w/blue-plate") -> str:
+    page = client.get(path)
+    if page.status_code != 200:
+        return ""
+    match = CSRF_RE.search(page.text)
+    if not match:
+        return ""
+    token = match.group(1)
+    client.headers.update({security.CSRF_HEADER: token})
+    return token
 
 
 def configure_tmp_db(tmp_path, monkeypatch):
@@ -48,6 +64,9 @@ def signup(client, *, drain=True, **overrides):
     res = client.post("/signup", data=data, follow_redirects=False)
     if drain:
         jobs.drain()
+    if res.status_code == 303:
+        location = res.headers.get("location", "/w/blue-plate").split("?", 1)[0]
+        prime_csrf(client, location)
     return res
 
 
@@ -191,6 +210,33 @@ def test_workspace_redirects_anonymous_to_login_next(tmp_path, monkeypatch):
     res = anon.get("/w/blue-plate", follow_redirects=False)
     assert res.status_code == 303
     assert res.headers["location"] == "/login?next=%2Fw%2Fblue-plate"
+
+
+def test_cookie_auth_posts_require_csrf_token(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    signup(client)
+    assert security.CSRF_COOKIE in client.cookies
+
+    client.headers.pop(security.CSRF_HEADER, None)
+    blocked = client.post(
+        "/w/blue-plate/menu",
+        data={"name": "Forged item"},
+        follow_redirects=False,
+    )
+    assert blocked.status_code == 403
+    assert "csrf" in blocked.text
+    assert db.one("SELECT * FROM menu_items WHERE name='Forged item'") is None
+
+    token = prime_csrf(client)
+    assert token
+    accepted = client.post(
+        "/w/blue-plate/menu",
+        data={"name": "Protected item"},
+        follow_redirects=False,
+    )
+    assert accepted.status_code == 303
+    assert db.one("SELECT * FROM menu_items WHERE name='Protected item'") is not None
 
 
 def test_workspace_cookie_without_user_cookie_is_not_authorization(tmp_path, monkeypatch):
@@ -382,6 +428,7 @@ def test_plain_members_cannot_access_billing_money_path(tmp_path, monkeypatch):
         "name": "Casey",
         "password": "correct-horse",
     }, follow_redirects=False)
+    prime_csrf(member_client)
 
     page = member_client.get("/w/blue-plate")
     billing = member_client.get("/w/blue-plate/billing", follow_redirects=False)
@@ -416,6 +463,7 @@ def test_plain_members_can_draft_but_not_publish_packs(tmp_path, monkeypatch):
         "name": "Publisher",
         "password": "correct-horse",
     }, follow_redirects=False)
+    prime_csrf(member_client)
     campaign = db.one("SELECT id FROM campaigns LIMIT 1")
     recipe = db.one("SELECT id FROM content_recipes WHERE slug='menu-launch'")
 
@@ -785,6 +833,7 @@ def test_member_role_update_and_revoke_remove_access(tmp_path, monkeypatch):
         "name": "Casey",
         "password": "correct-horse",
     }, follow_redirects=False)
+    prime_csrf(member_client)
     user = db.one("SELECT * FROM users WHERE email='casey@example.com'")
 
     role = owner.post(f"/w/blue-plate/settings/members/{user['id']}/role",

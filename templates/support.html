@@ -121,7 +121,7 @@
           <a class="button ghost" href="/w/{{ org.slug }}?result={{ job.result_pack_id }}#pack-{{ job.result_pack_id }}">Open result</a>
           {% endif %}
           {% if job.status == "failed" %}
-          <form method="post" action="/w/{{ org.slug }}/jobs/{{ job.id }}/retry"><button class="secondary">Retry</button></form>
+          <form method="post" action="/w/{{ org.slug }}/jobs/{{ job.id }}/retry">{{ csrf_input(request) }}<button class="secondary">Retry</button></form>
           {% endif %}
         </div>
       </article>

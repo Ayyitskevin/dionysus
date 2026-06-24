@@ -7,7 +7,7 @@
     <h1>Sell the month after the shoot.</h1>
     <p class="lede">For restaurants, Platekit turns food photos into campaigns, captions, delivery-app copy, and launch plans. For photographers, it turns strategy work into a recurring SaaS deliverable clients can understand and buy.</p>
   </div>
-  <form id="signup" class="signup onboarding" method="post" action="/signup">
+  <form id="signup" class="signup onboarding" method="post" action="/signup">{{ csrf_input(request) }}
     <h2>Build the first pack</h2>
     {% if signup_error %}
     <p class="error">{{ signup_error }} <a href="/login?email={{ signup.email }}">Log in instead</a>.</p>

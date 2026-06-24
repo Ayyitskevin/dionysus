@@ -38,7 +38,7 @@
   {% endif %}
 
   <div class="settings-grid">
-    <form method="post" action="/w/{{ org.slug }}/settings" class="panel">
+    <form method="post" action="/w/{{ org.slug }}/settings" class="panel">{{ csrf_input(request) }}
       <h2>Workspace basics</h2>
       <label>Business or studio <input name="company" value="{{ org.company or '' }}"></label>
       <label>Contact email <input name="email" type="email" value="{{ org.email }}" required></label>
@@ -58,7 +58,7 @@
         <div><dt>Workspace token</dt><dd>ends in {{ access_token_tail }}</dd></div>
         <div><dt>Created</dt><dd>{{ org.created_at }}</dd></div>
       </dl>
-      <form method="post" action="/w/{{ org.slug }}/settings/token">
+      <form method="post" action="/w/{{ org.slug }}/settings/token">{{ csrf_input(request) }}
         <button class="secondary">Rotate workspace token</button>
       </form>
     </section>
@@ -69,7 +69,7 @@
       <h2>Members</h2>
       <a class="small-link" href="/w/{{ org.slug }}/support">Support dashboard</a>
     </div>
-    <form method="post" action="/w/{{ org.slug }}/settings/members/invite" class="member-invite">
+    <form method="post" action="/w/{{ org.slug }}/settings/members/invite" class="member-invite">{{ csrf_input(request) }}
       <label>Name <input name="invitee_name" placeholder="Optional"></label>
       <label>Email <input name="email" type="email" required></label>
       <label>Role
@@ -94,14 +94,14 @@
           {% elif m.role == "owner" %}
           <span class="muted">Owner</span>
           {% else %}
-          <form method="post" action="/w/{{ org.slug }}/settings/members/{{ m.user_id }}/role">
+          <form method="post" action="/w/{{ org.slug }}/settings/members/{{ m.user_id }}/role">{{ csrf_input(request) }}
             <select name="role">
               <option value="member" {% if m.role == "member" %}selected{% endif %}>Member</option>
               <option value="admin" {% if m.role == "admin" %}selected{% endif %}>Admin</option>
             </select>
             <button class="secondary">Update role</button>
           </form>
-          <form method="post" action="/w/{{ org.slug }}/settings/members/{{ m.user_id }}/revoke">
+          <form method="post" action="/w/{{ org.slug }}/settings/members/{{ m.user_id }}/revoke">{{ csrf_input(request) }}
             <button class="ghost">Revoke access</button>
           </form>
           {% endif %}
@@ -121,7 +121,7 @@
           <input readonly value="{{ invite.invite_url }}">
         </div>
         <div class="settings-actions">
-          <form method="post" action="/w/{{ org.slug }}/settings/invites/{{ invite.id }}/revoke">
+          <form method="post" action="/w/{{ org.slug }}/settings/invites/{{ invite.id }}/revoke">{{ csrf_input(request) }}
             <button class="ghost">Revoke invite</button>
           </form>
         </div>
@@ -147,7 +147,7 @@
         <div class="settings-actions">
           {% if pack.share_token %}
           <a class="small-link" href="/share/{{ pack.share_token }}">Open public link</a>
-          <form method="post" action="/w/{{ org.slug }}/settings/packs/{{ pack.id }}/revoke-share">
+          <form method="post" action="/w/{{ org.slug }}/settings/packs/{{ pack.id }}/revoke-share">{{ csrf_input(request) }}
             <button class="ghost">Revoke share link</button>
           </form>
           {% else %}
