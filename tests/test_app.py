@@ -793,6 +793,109 @@ def test_failed_regeneration_job_can_retry_without_duplicate_pack(tmp_path, monk
     assert event["entity_id"] == job["id"]
 
 
+def test_generate_pack_double_submit_reuses_active_job(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    signup(client, plan="restaurant_starter")
+    campaign = db.one("SELECT id FROM campaigns LIMIT 1")
+    recipe = db.one("SELECT id FROM content_recipes WHERE slug='menu-launch'")
+
+    first = client.post(
+        f"/w/blue-plate/campaigns/{campaign['id']}/generate",
+        data={"recipe_id": recipe["id"]},
+        follow_redirects=False,
+    )
+    second = client.post(
+        f"/w/blue-plate/campaigns/{campaign['id']}/generate",
+        data={"recipe_id": recipe["id"]},
+        follow_redirects=False,
+    )
+
+    jobs_for_campaign = db.all_(
+        "SELECT * FROM jobs WHERE kind='generate_pack' AND status='queued' ORDER BY id"
+    )
+    job_ids = {job["id"] for job in jobs_for_campaign}
+    org = db.one("SELECT * FROM organizations WHERE slug='blue-plate'")
+    assert first.status_code == 303
+    assert second.status_code == 303
+    assert first.headers["location"] == second.headers["location"]
+    assert len(job_ids) == 1
+    assert jobs.pending_pack_count(org["id"]) == 1
+
+
+def test_regenerate_double_submit_reuses_active_job_and_capacity(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    signup(client, plan="restaurant_starter")
+    pack = db.one("SELECT * FROM content_packs")
+
+    first = client.post(
+        f"/w/blue-plate/packs/{pack['id']}/regenerate",
+        data={"feedback": "  Make   it   premium.  "},
+        follow_redirects=False,
+    )
+    second = client.post(
+        f"/w/blue-plate/packs/{pack['id']}/regenerate",
+        data={"feedback": "make it premium."},
+        follow_redirects=False,
+    )
+
+    queued = db.all_(
+        "SELECT * FROM jobs WHERE kind='regenerate_pack' AND status='queued' ORDER BY id"
+    )
+    org = db.one("SELECT * FROM organizations WHERE slug='blue-plate'")
+    assert first.status_code == 303
+    assert second.status_code == 303
+    assert first.headers["location"] == second.headers["location"]
+    assert len(queued) == 1
+    assert jobs.pending_pack_count(org["id"]) == 1
+
+
+def test_enqueue_reuses_legacy_active_jobs_without_idempotency_key(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    signup(client)
+    org = db.one("SELECT * FROM organizations WHERE slug='blue-plate'")
+    campaign = db.one("SELECT * FROM campaigns LIMIT 1")
+    recipe = db.one("SELECT * FROM content_recipes WHERE slug='menu-launch'")
+    pack = db.one("SELECT * FROM content_packs")
+
+    legacy_generate = db.run(
+        """INSERT INTO jobs (kind, payload, status, org_id)
+           VALUES (?,?,?,?)""",
+        (
+            "generate_pack",
+            json.dumps({
+                "campaign_id": campaign["id"],
+                "recipe_id": recipe["id"],
+                "argus_run_id": None,
+            }),
+            "queued",
+            org["id"],
+        ),
+    )
+    assert jobs.enqueue_generate(campaign["id"], recipe["id"]) == legacy_generate
+
+    legacy_regenerate = db.run(
+        """INSERT INTO jobs (kind, payload, status, org_id, source_pack_id)
+           VALUES (?,?,?,?,?)""",
+        (
+            "regenerate_pack",
+            json.dumps({
+                "source_pack_id": pack["id"],
+                "feedback": "  Make   It Premium.  ",
+            }),
+            "queued",
+            org["id"],
+            pack["id"],
+        ),
+    )
+    assert jobs.enqueue_regenerate(pack["id"], "make it premium.") == legacy_regenerate
+    assert db.one(
+        "SELECT COUNT(*) AS n FROM jobs WHERE status='queued'"
+    )["n"] == 2
+
+
 def test_feedback_regeneration_respects_monthly_pack_limit(tmp_path, monkeypatch):
     configure_tmp_db(tmp_path, monkeypatch)
     client = TestClient(app)
@@ -1463,7 +1566,7 @@ def test_cli_backup_creates_private_verified_snapshot(tmp_path, monkeypatch, cap
     assert cli.main(["backup", str(destination)]) == 0
     output = capsys.readouterr().out
     assert "backup\t" in output
-    assert "restore_check\tok\tintegrity=ok\tmigrations=7" in output
+    assert "restore_check\tok\tintegrity=ok\tmigrations=8" in output
 
     snapshots = list(destination.glob("dionysus-*.db"))
     assert len(snapshots) == 1
@@ -1480,7 +1583,7 @@ def test_cli_backup_creates_private_verified_snapshot(tmp_path, monkeypatch, cap
 
     assert cli.main(["verify-backup", str(snapshots[0])]) == 0
     verify_output = capsys.readouterr().out
-    assert "verify\tok\tintegrity=ok\tmigrations=7" in verify_output
+    assert "verify\tok\tintegrity=ok\tmigrations=8" in verify_output
 
 
 def test_workspace_surfaces_upgrade_prompt_for_locked_recipe(tmp_path, monkeypatch):

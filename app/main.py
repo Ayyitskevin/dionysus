@@ -1053,8 +1053,10 @@ async def generate_pack(request: Request, slug: str, campaign_id: int,
     sub = billing.checkout_state(org)
     if not plans.allowed_recipe(sub["plan"], recipe["slug"]):
         raise HTTPException(status_code=402, detail="upgrade required for this recipe")
-    _enforce_monthly_pack_limit(org, sub=sub)
-    job_id = jobs.enqueue_generate(campaign_id, recipe_id, argus_run_id=argus_run_id)
+    job_id = jobs.active_generate_job_id(campaign_id, recipe_id, argus_run_id=argus_run_id)
+    if job_id is None:
+        _enforce_monthly_pack_limit(org, sub=sub)
+        job_id = jobs.enqueue_generate(campaign_id, recipe_id, argus_run_id=argus_run_id)
     return RedirectResponse(f"/w/{slug}?job={job_id}#jobs", status_code=303)
 
 
@@ -1163,9 +1165,11 @@ async def regenerate_pack(request: Request, slug: str, pack_id: int,
     sub = billing.checkout_state(org)
     if not plans.allowed_recipe(sub["plan"], pack["recipe_slug"]):
         raise HTTPException(status_code=402, detail="upgrade required for this recipe")
-    _enforce_monthly_pack_limit(org, sub=sub)
-    job_id = jobs.enqueue_regenerate(
-        pack["id"], feedback, actor_user_id=audit.actor_id(user))
+    job_id = jobs.active_regenerate_job_id(pack["id"], feedback)
+    if job_id is None:
+        _enforce_monthly_pack_limit(org, sub=sub)
+        job_id = jobs.enqueue_regenerate(
+            pack["id"], feedback, actor_user_id=audit.actor_id(user))
     return RedirectResponse(f"/w/{slug}?job={job_id}#jobs", status_code=303)
 
 

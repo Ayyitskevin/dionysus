@@ -4,8 +4,10 @@ Web routes enqueue durable jobs. A CLI worker claims queued jobs and executes
 them outside the request path.
 """
 
+import hashlib
 import json
 import logging
+import sqlite3
 import time
 from typing import Any
 
@@ -15,6 +17,137 @@ log = logging.getLogger("dionysus.jobs")
 
 PACK_JOB_KINDS = ("generate_pack", "regenerate_pack")
 ACTIVE_STATUSES = ("queued", "running")
+
+
+def _normalize_feedback(feedback: str) -> str:
+    return " ".join(feedback.strip().lower().split())
+
+
+def _generate_idempotency_key(
+    campaign_id: int,
+    recipe_id: int,
+    argus_run_id: int | None,
+) -> str:
+    run_part = "" if argus_run_id is None else str(argus_run_id)
+    return f"generate_pack:{campaign_id}:{recipe_id}:{run_part}"
+
+
+def _regenerate_idempotency_key(source_pack_id: int, feedback: str) -> str:
+    digest = hashlib.sha256(_normalize_feedback(feedback).encode()).hexdigest()
+    return f"regenerate_pack:{source_pack_id}:{digest}"
+
+
+def _active_job_id(idempotency_key: str) -> int | None:
+    row = db.one("""SELECT id FROM jobs
+                    WHERE idempotency_key=?
+                      AND status IN ('queued','running')
+                    ORDER BY id
+                    LIMIT 1""", (idempotency_key,))
+    return int(row["id"]) if row else None
+
+
+def _active_legacy_job_id(kind: str, expected_payload: dict[str, Any]) -> int | None:
+    rows = db.all_("""SELECT id, payload FROM jobs
+                    WHERE kind=?
+                      AND idempotency_key IS NULL
+                      AND status IN ('queued','running')
+                    ORDER BY id""", (kind,))
+    for row in rows:
+        try:
+            payload = json.loads(row["payload"] or "{}")
+        except json.JSONDecodeError:
+            continue
+        matches = True
+        for key, value in expected_payload.items():
+            if key == "feedback":
+                if _normalize_feedback(str(payload.get(key) or "")) != _normalize_feedback(str(value)):
+                    matches = False
+                    break
+            elif payload.get(key) != value:
+                matches = False
+                break
+        if matches:
+            return int(row["id"])
+    return None
+
+
+def active_generate_job_id(
+    campaign_id: int,
+    recipe_id: int,
+    *,
+    argus_run_id: int | None = None,
+) -> int | None:
+    key = _generate_idempotency_key(campaign_id, recipe_id, argus_run_id)
+    return _active_job_id(key) or _active_legacy_job_id(
+        "generate_pack",
+        {
+            "campaign_id": campaign_id,
+            "recipe_id": recipe_id,
+            "argus_run_id": argus_run_id,
+        },
+    )
+
+
+def active_regenerate_job_id(source_pack_id: int, feedback: str) -> int | None:
+    key = _regenerate_idempotency_key(source_pack_id, feedback)
+    return _active_job_id(key) or _active_legacy_job_id(
+        "regenerate_pack",
+        {
+            "source_pack_id": source_pack_id,
+            "feedback": feedback,
+        },
+    )
+
+
+def _insert_idempotent_job(
+    *,
+    kind: str,
+    payload: dict[str, Any],
+    org_id: int,
+    idempotency_key: str,
+    source_pack_id: int | None = None,
+) -> int:
+    con = db.connect()
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        existing = con.execute(
+            """SELECT id FROM jobs
+               WHERE idempotency_key=?
+                 AND status IN ('queued','running')
+               ORDER BY id
+               LIMIT 1""",
+            (idempotency_key,),
+        ).fetchone()
+        if existing:
+            con.commit()
+            return int(existing["id"])
+        try:
+            cur = con.execute(
+                """INSERT INTO jobs
+                   (kind, payload, org_id, source_pack_id, idempotency_key)
+                   VALUES (?,?,?,?,?)""",
+                (kind, json.dumps(payload), org_id, source_pack_id, idempotency_key),
+            )
+        except sqlite3.IntegrityError:
+            existing = con.execute(
+                """SELECT id FROM jobs
+                   WHERE idempotency_key=?
+                     AND status IN ('queued','running')
+                   ORDER BY id
+                   LIMIT 1""",
+                (idempotency_key,),
+            ).fetchone()
+            if existing:
+                con.commit()
+                return int(existing["id"])
+            raise
+        con.commit()
+        return int(cur.lastrowid)
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
 
 
 def enqueue_generate(campaign_id: int, recipe_id: int, *,
@@ -27,9 +160,15 @@ def enqueue_generate(campaign_id: int, recipe_id: int, *,
         "recipe_id": recipe_id,
         "argus_run_id": argus_run_id,
     }
-    return db.run("""INSERT INTO jobs (kind, payload, org_id)
-                     VALUES (?,?,?)""",
-                  ("generate_pack", json.dumps(payload), campaign["org_id"]))
+    existing = active_generate_job_id(campaign_id, recipe_id, argus_run_id=argus_run_id)
+    if existing is not None:
+        return existing
+    return _insert_idempotent_job(
+        kind="generate_pack",
+        payload=payload,
+        org_id=campaign["org_id"],
+        idempotency_key=_generate_idempotency_key(campaign_id, recipe_id, argus_run_id),
+    )
 
 
 def enqueue_regenerate(source_pack_id: int, feedback: str, *,
@@ -40,11 +179,16 @@ def enqueue_regenerate(source_pack_id: int, feedback: str, *,
     payload: dict[str, Any] = {"source_pack_id": source_pack_id, "feedback": feedback}
     if actor_user_id is not None:
         payload["actor_user_id"] = actor_user_id
-    return db.run("""INSERT INTO jobs
-                     (kind, payload, org_id, source_pack_id)
-                     VALUES (?,?,?,?)""",
-                  ("regenerate_pack", json.dumps(payload),
-                   source["org_id"], source_pack_id))
+    existing = active_regenerate_job_id(source_pack_id, feedback)
+    if existing is not None:
+        return existing
+    return _insert_idempotent_job(
+        kind="regenerate_pack",
+        payload=payload,
+        org_id=source["org_id"],
+        source_pack_id=source_pack_id,
+        idempotency_key=_regenerate_idempotency_key(source_pack_id, feedback),
+    )
 
 
 def execute(job_id: int) -> dict | None:
