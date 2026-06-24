@@ -16,7 +16,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import (
     audit, billing, config, db, generator, jobs, mise_hook, packs as pack_utils,
-    plans, readiness, recipes, security,
+    plans, rate_limit, readiness, recipes, security,
 )
 from .render import ROOT, templates
 
@@ -221,6 +221,14 @@ async def invite_form(request: Request, token: str):
 @app.post("/invite/{token}/accept")
 async def accept_invite(request: Request, token: str, name: str = Form(""),
                         password: str = Form(...)):
+    _enforce_subject_ip_rate_limit(
+        request,
+        "invite_accept",
+        token,
+        subject_limit=rate_limit.INVITE_SUBJECT_LIMIT,
+        ip_limit=rate_limit.INVITE_IP_LIMIT,
+        window_seconds=rate_limit.AUTH_WINDOW_SECONDS,
+    )
     invite = _invite_by_token(token)
     if not invite or invite["status"] != "pending":
         raise HTTPException(status_code=404, detail="invite not found")
@@ -276,6 +284,14 @@ async def login_form(request: Request):
 async def login(request: Request, email: str = Form(...), password: str = Form(...),
                 next: str = Form("")):
     email = email.strip().lower()
+    _enforce_subject_ip_rate_limit(
+        request,
+        "login",
+        email,
+        subject_limit=rate_limit.LOGIN_SUBJECT_LIMIT,
+        ip_limit=rate_limit.LOGIN_IP_LIMIT,
+        window_seconds=rate_limit.AUTH_WINDOW_SECONDS,
+    )
     user = db.one("SELECT * FROM users WHERE email=?", (email,))
     safe_next = _safe_next(next)
     if not user or not security.verify_password(password, user["password_hash"]):
@@ -447,6 +463,33 @@ def _count_by(rows, key: str, defaults: tuple[str, ...]) -> dict:
     return counts
 
 
+def _enforce_subject_ip_rate_limit(
+    request: Request,
+    action: str,
+    subject: str,
+    *,
+    subject_limit: int,
+    ip_limit: int,
+    window_seconds: int,
+) -> None:
+    ip = rate_limit.client_ip(request)
+    try:
+        rate_limit.check(
+            f"{action}:ip",
+            ip,
+            limit=ip_limit,
+            window_seconds=window_seconds,
+        )
+        rate_limit.check(
+            f"{action}:subject_ip",
+            rate_limit.identity(ip, subject),
+            limit=subject_limit,
+            window_seconds=window_seconds,
+        )
+    except rate_limit.RateLimitExceeded as exc:
+        raise HTTPException(status_code=429, detail="too many attempts") from exc
+
+
 def _set_auth_cookies(resp: RedirectResponse, user_id: int, slug: str) -> RedirectResponse:
     resp.set_cookie(security.USER_COOKIE, security.user_cookie(user_id),
                     **_auth_cookie_kwargs())
@@ -485,11 +528,19 @@ async def signup(request: Request, name: str = Form(...), email: str = Form(...)
                  service_mix: str = Form(""), first_item: str = Form(""),
                  first_item_note: str = Form(""), campaign_goal: str = Form(""),
                  launch_date: str = Form("")):
+    email = email.strip().lower()
+    _enforce_subject_ip_rate_limit(
+        request,
+        "signup",
+        email,
+        subject_limit=rate_limit.SIGNUP_SUBJECT_LIMIT,
+        ip_limit=rate_limit.SIGNUP_IP_LIMIT,
+        window_seconds=rate_limit.AUTH_WINDOW_SECONDS,
+    )
     if audience not in ("restaurant", "photographer"):
         raise HTTPException(status_code=400, detail="choose restaurant or photographer")
     if len(password) < 8:
         raise HTTPException(status_code=400, detail="password must be at least 8 characters")
-    email = email.strip().lower()
     if db.one("SELECT id FROM users WHERE email=?", (email,)):
         signup_state = _signup_state({
             "name": name.strip(),

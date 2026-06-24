@@ -4,7 +4,7 @@ import json
 
 from fastapi.testclient import TestClient
 
-from app import argus, db, jobs
+from app import argus, db, jobs, rate_limit
 from app.main import app
 from tests.test_app import configure_tmp_db, signup
 
@@ -14,6 +14,21 @@ def test_argus_pack_hook_is_bearer_gated(tmp_path, monkeypatch):
     client = TestClient(app)
     assert client.post("/api/mise/organizations/blue-plate/argus-pack",
                        json={"argus_run_id": 1}).status_code == 401
+
+
+def test_mise_token_failures_are_rate_limited(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(rate_limit, "MISE_TOKEN_LIMIT", 2)
+    client = TestClient(app)
+    for _ in range(2):
+        res = client.post("/api/mise/organizations/blue-plate/argus-pack",
+                          headers={"Authorization": "Bearer wrong"},
+                          json={"argus_run_id": 1})
+        assert res.status_code == 401
+    blocked = client.post("/api/mise/organizations/blue-plate/argus-pack",
+                          headers={"Authorization": "Bearer wrong"},
+                          json={"argus_run_id": 1})
+    assert blocked.status_code == 429
 
 
 def test_argus_pack_hook_creates_keyword_enriched_draft(tmp_path, monkeypatch):

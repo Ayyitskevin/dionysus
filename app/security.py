@@ -10,7 +10,7 @@ import string
 from fastapi import HTTPException, Request
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
-from . import config
+from . import config, rate_limit
 
 _BASE62 = string.ascii_letters + string.digits
 _SLUG_SAFE = re.compile(r"[^a-z0-9]+")
@@ -115,4 +115,13 @@ def require_mise_token(request: Request) -> None:
     header = request.headers.get("Authorization", "")
     expected = f"Bearer {config.MISE_IMPORT_TOKEN}"
     if not secrets.compare_digest(header, expected):
+        try:
+            rate_limit.check(
+                "mise_token:ip",
+                rate_limit.client_ip(request),
+                limit=rate_limit.MISE_TOKEN_LIMIT,
+                window_seconds=rate_limit.MISE_TOKEN_WINDOW_SECONDS,
+            )
+        except rate_limit.RateLimitExceeded as exc:
+            raise HTTPException(status_code=429, detail="too many attempts") from exc
         raise HTTPException(status_code=401, detail="bad token")

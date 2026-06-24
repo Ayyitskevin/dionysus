@@ -10,7 +10,7 @@ os.environ["DIONYSUS_DATA_DIR"] = "/tmp/dionysus-test-data"
 os.environ["DIONYSUS_SECRET_KEY"] = "test-secret"
 os.environ["DIONYSUS_MISE_IMPORT_TOKEN"] = "mise-test"
 
-from app import db, generator, jobs, security  # noqa: E402
+from app import db, generator, jobs, rate_limit, security  # noqa: E402
 from app.main import app  # noqa: E402
 
 
@@ -187,6 +187,45 @@ def test_auth_cookies_use_secure_flag_when_configured(tmp_path, monkeypatch):
     login_cookies = login.headers.get_list("set-cookie")
     assert len(login_cookies) == 2
     assert all("Secure" in cookie for cookie in login_cookies)
+
+
+def test_login_rate_limit_blocks_repeated_failures_and_resets(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(rate_limit, "LOGIN_SUBJECT_LIMIT", 2)
+    client = TestClient(app)
+    signup(client)
+
+    for _ in range(2):
+        res = client.post("/login", data={
+            "email": "avery@example.com",
+            "password": "wrong-password",
+        }, follow_redirects=False)
+        assert res.status_code == 401
+
+    blocked = client.post("/login", data={
+        "email": "avery@example.com",
+        "password": "wrong-password",
+    }, follow_redirects=False)
+    assert blocked.status_code == 429
+
+    db.run("UPDATE rate_limit_events SET created_at=datetime('now', '-1 hour')")
+    reset = client.post("/login", data={
+        "email": "avery@example.com",
+        "password": "wrong-password",
+    }, follow_redirects=False)
+    assert reset.status_code == 401
+
+
+def test_signup_rate_limit_blocks_ip_spam(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(rate_limit, "SIGNUP_IP_LIMIT", 1)
+    client = TestClient(app)
+    first = signup(client, email="first@example.com", company="First Co")
+    assert first.status_code == 303
+
+    blocked = signup(client, email="second@example.com", company="Second Co")
+    assert blocked.status_code == 429
+    assert db.one("SELECT * FROM users WHERE email='second@example.com'") is None
 
 
 def test_login_restores_workspace_access(tmp_path, monkeypatch):
@@ -369,6 +408,33 @@ def test_settings_rotate_workspace_access_token(tmp_path, monkeypatch):
     event = db.one("SELECT * FROM audit_events WHERE action='workspace.token_rotated'")
     assert event and new[-6:] in event["summary"]
     assert json.loads(event["details_json"])["token_tail"] == new[-6:]
+
+
+def test_invite_accept_rate_limit_blocks_repeated_bad_passwords(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(rate_limit, "INVITE_SUBJECT_LIMIT", 2)
+    owner = TestClient(app)
+    signup(owner)
+    owner.post("/w/blue-plate/settings/members/invite", data={
+        "email": "limit@example.com",
+        "role": "member",
+    }, follow_redirects=False)
+    invite = db.one("SELECT * FROM workspace_invites WHERE email='limit@example.com'")
+
+    invitee = TestClient(app)
+    for _ in range(2):
+        res = invitee.post(f"/invite/{invite['token']}/accept", data={
+            "name": "Limit",
+            "password": "short",
+        }, follow_redirects=False)
+        assert res.status_code == 200
+
+    blocked = invitee.post(f"/invite/{invite['token']}/accept", data={
+        "name": "Limit",
+        "password": "short",
+    }, follow_redirects=False)
+    assert blocked.status_code == 429
+    assert db.one("SELECT * FROM users WHERE email='limit@example.com'") is None
 
 
 def test_settings_invites_new_member_and_acceptance_creates_access(tmp_path, monkeypatch):
@@ -1566,7 +1632,7 @@ def test_cli_backup_creates_private_verified_snapshot(tmp_path, monkeypatch, cap
     assert cli.main(["backup", str(destination)]) == 0
     output = capsys.readouterr().out
     assert "backup\t" in output
-    assert "restore_check\tok\tintegrity=ok\tmigrations=8" in output
+    assert "restore_check\tok\tintegrity=ok\tmigrations=9" in output
 
     snapshots = list(destination.glob("dionysus-*.db"))
     assert len(snapshots) == 1
@@ -1583,7 +1649,7 @@ def test_cli_backup_creates_private_verified_snapshot(tmp_path, monkeypatch, cap
 
     assert cli.main(["verify-backup", str(snapshots[0])]) == 0
     verify_output = capsys.readouterr().out
-    assert "verify\tok\tintegrity=ok\tmigrations=8" in verify_output
+    assert "verify\tok\tintegrity=ok\tmigrations=9" in verify_output
 
 
 def test_workspace_surfaces_upgrade_prompt_for_locked_recipe(tmp_path, monkeypatch):
