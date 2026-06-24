@@ -1074,7 +1074,7 @@ async def copy_shared_pack(token: str):
 
 @app.get("/w/{slug}/billing", response_class=HTMLResponse)
 async def billing_page(request: Request, slug: str):
-    org, _ = _require_workspace(request, slug)
+    org, _, _ = _require_owner(request, slug)
     suggested_plan = request.query_params.get("plan") or ""
     if suggested_plan not in plans.PLANS:
         suggested_plan = ""
@@ -1093,7 +1093,7 @@ async def billing_page(request: Request, slug: str):
 @app.post("/w/{slug}/billing/plan")
 async def choose_plan(request: Request, slug: str, plan: str = Form(...),
                       checkout: str = Form("")):
-    org, user = _require_workspace(request, slug)
+    org, user, _ = _require_owner(request, slug)
     plan = plans.normalize_plan(plan, org["audience"])
     if plans.PLANS[plan]["audience"] != org["audience"]:
         raise HTTPException(status_code=400, detail="plan does not match workspace")
@@ -1122,7 +1122,7 @@ async def choose_plan(request: Request, slug: str, plan: str = Form(...),
 
 @app.post("/w/{slug}/billing/checkout")
 async def start_checkout(request: Request, slug: str):
-    org, user = _require_workspace(request, slug)
+    org, user, _ = _require_owner(request, slug)
     url = billing.create_checkout_session(
         org,
         success_url=f"{config.BASE_URL}/w/{slug}/billing?checkout=success",

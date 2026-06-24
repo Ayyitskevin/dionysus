@@ -10,8 +10,8 @@
   </div>
   <div class="head-actions">
     <a class="button" href="#packs">Latest pack</a>
-    <a class="button secondary" href="/w/{{ org.slug }}/billing">Billing</a>
     {% if can_manage_workspace %}
+    <a class="button secondary" href="/w/{{ org.slug }}/billing">Billing</a>
     <a class="button ghost" href="/w/{{ org.slug }}/settings">Settings</a>
     <a class="button ghost" href="/w/{{ org.slug }}/support">Support</a>
     {% endif %}
@@ -35,10 +35,14 @@
   <div class="usage-card">
     <strong>{{ subscription.plan_meta.name }}</strong>
     <span>{{ pack_used }}{% if pack_limit is not none %}/{{ pack_limit }}{% else %}/unlimited{% endif %} packs used this month</span>
-    {% if pack_limit is not none and pack_used >= pack_limit and limit_upgrade_plan %}
-      <a class="button secondary" href="/w/{{ org.slug }}/billing?plan={{ limit_upgrade_plan }}">Upgrade for more packs</a>
+    {% if can_manage_workspace %}
+      {% if pack_limit is not none and pack_used >= pack_limit and limit_upgrade_plan %}
+        <a class="button secondary" href="/w/{{ org.slug }}/billing?plan={{ limit_upgrade_plan }}">Upgrade for more packs</a>
+      {% else %}
+        <a class="small-link" href="/w/{{ org.slug }}/billing">Manage plan</a>
+      {% endif %}
     {% else %}
-      <a class="small-link" href="/w/{{ org.slug }}/billing">Manage plan</a>
+      <span class="muted">Ask an owner or admin to manage billing.</span>
     {% endif %}
   </div>
 </section>
@@ -49,7 +53,11 @@
     <strong>Monthly pack limit reached.</strong>
     <span>Upgrade to {{ plans_by_key[limit_upgrade_plan].name }} for {% if plans_by_key[limit_upgrade_plan].pack_limit is none %}unlimited packs{% else %}more monthly packs{% endif %}.</span>
   </div>
+  {% if can_manage_workspace %}
   <a class="button secondary" href="/w/{{ org.slug }}/billing?plan={{ limit_upgrade_plan }}">Upgrade plan</a>
+  {% else %}
+  <span class="muted">Ask an owner or admin to upgrade the plan.</span>
+  {% endif %}
 </section>
 {% endif %}
 
@@ -150,9 +158,15 @@
         </form>
         {% for recipe in recipes %}
           {% if recipe.audience in ("both", org.audience) and upgrade_recipes[recipe.id] %}
+          {% if can_manage_workspace %}
           <a class="locked-recipe" href="/w/{{ org.slug }}/billing?plan={{ upgrade_recipes[recipe.id] }}">
             Unlock {{ recipe.name }} with {{ plans_by_key[upgrade_recipes[recipe.id]].name }}
           </a>
+          {% else %}
+          <span class="locked-recipe">
+            Unlock {{ recipe.name }} with {{ plans_by_key[upgrade_recipes[recipe.id]].name }}. Ask an owner or admin to upgrade.
+          </span>
+          {% endif %}
           {% endif %}
         {% endfor %}
       </div>
