@@ -317,6 +317,40 @@ def test_settings_invites_new_member_and_acceptance_creates_access(tmp_path, mon
     assert accepted_event and accepted_event["actor_user_id"] == user["id"]
 
 
+def test_plain_members_cannot_access_billing_money_path(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    owner = TestClient(app)
+    signup(owner)
+    owner.post("/w/blue-plate/settings/members/invite", data={
+        "email": "casey@example.com",
+        "role": "member",
+    }, follow_redirects=False)
+    invite = db.one("SELECT * FROM workspace_invites WHERE email='casey@example.com'")
+    member_client = TestClient(app)
+    member_client.post(f"/invite/{invite['token']}/accept", data={
+        "name": "Casey",
+        "password": "correct-horse",
+    }, follow_redirects=False)
+
+    page = member_client.get("/w/blue-plate")
+    billing = member_client.get("/w/blue-plate/billing", follow_redirects=False)
+    plan = member_client.post(
+        "/w/blue-plate/billing/plan",
+        data={"plan": "restaurant_starter"},
+        follow_redirects=False,
+    )
+    checkout = member_client.post("/w/blue-plate/billing/checkout", follow_redirects=False)
+
+    assert page.status_code == 200
+    assert 'href="/w/blue-plate/billing"' not in page.text
+    assert "Ask an owner or admin to manage billing." in page.text
+    assert billing.status_code == 403
+    assert plan.status_code == 403
+    assert checkout.status_code == 403
+    org = db.one("SELECT * FROM organizations WHERE slug='blue-plate'")
+    assert org["plan"] == "restaurant_growth"
+
+
 def test_member_role_update_and_revoke_remove_access(tmp_path, monkeypatch):
     configure_tmp_db(tmp_path, monkeypatch)
     owner = TestClient(app)
