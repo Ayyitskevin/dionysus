@@ -51,8 +51,26 @@ def test_argus_pack_hook_creates_keyword_enriched_draft(tmp_path, monkeypatch):
 
     job = db.one("SELECT * FROM jobs WHERE id=?", (body["job_id"],))
     assert job["status"] == "queued"
+    assert client.get(
+        f"/api/mise/organizations/blue-plate/jobs/{body['job_id']}"
+    ).status_code == 401
+    queued_status = client.get(
+        f"/api/mise/organizations/blue-plate/jobs/{body['job_id']}",
+        headers={"Authorization": "Bearer mise-test"},
+    )
+    assert queued_status.status_code == 200
+    assert queued_status.json()["job"]["status"] == "queued"
+    assert queued_status.json()["job"]["terminal"] is False
+
     assert jobs.drain(limit=1) == 1
     done = db.one("SELECT * FROM jobs WHERE id=?", (body["job_id"],))
+    done_status = client.get(
+        f"/api/mise/organizations/blue-plate/jobs/{body['job_id']}",
+        headers={"Authorization": "Bearer mise-test"},
+    )
+    assert done_status.status_code == 200
+    assert done_status.json()["job"]["status"] == "done"
+    assert done_status.json()["job"]["result_pack_id"] == done["result_pack_id"]
     pack = db.one("SELECT * FROM content_packs WHERE id=?", (done["result_pack_id"],))
     data = json.loads(pack["body_json"])
     assert data["provenance"]["engine"] == "dionysus-argus-enriched"

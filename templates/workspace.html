@@ -1,5 +1,91 @@
 {% extends "base.html" %}
 {% block title %}{{ org.name }} · Dionysus{% endblock %}
+{% block scripts %}
+{% if job_focus_id %}
+<script>
+(() => {
+  const jobsSection = document.querySelector("#jobs[data-job-focus-id]");
+  if (!jobsSection) return;
+  const focusId = jobsSection.dataset.jobFocusId;
+  if (!focusId || focusId === "0") return;
+  const row = jobsSection.querySelector(`[data-job-id="${focusId}"]`);
+  if (!row || !row.dataset.jobStatusUrl) return;
+
+  const meta = row.querySelector("[data-job-meta]");
+  const summary = row.querySelector("[data-job-summary]");
+  const statusPill = row.querySelector("[data-job-status]");
+  const actions = row.querySelector("[data-job-actions]");
+
+  function setText(node, value) {
+    if (node) node.textContent = value;
+  }
+
+  function ensureResult(job) {
+    if (!actions || !job.result_url) return;
+    let link = actions.querySelector("[data-job-result]");
+    if (!link) {
+      link = document.createElement("a");
+      link.className = "button ghost";
+      link.dataset.jobResult = "1";
+      link.textContent = "Open result";
+      actions.appendChild(link);
+    }
+    link.href = job.result_url;
+  }
+
+  function ensureRetry(job) {
+    if (!actions || !job.retry_url) return;
+    if (actions.querySelector("[data-job-retry]")) return;
+    const form = document.createElement("form");
+    form.method = "post";
+    form.action = job.retry_url;
+    form.dataset.jobRetry = "1";
+    const button = document.createElement("button");
+    button.className = "secondary";
+    button.textContent = "Retry";
+    form.appendChild(button);
+    actions.appendChild(form);
+  }
+
+  function render(job) {
+    setText(summary, job.summary);
+    const parts = [job.kind, job.status, `attempts ${job.attempts}`];
+    if (job.result_pack_title) parts.push(`result ${job.result_pack_title}`);
+    if (job.error) parts.push(job.error);
+    setText(meta, parts.join(" · "));
+    if (statusPill) {
+      statusPill.textContent = job.status;
+      statusPill.className = `status-pill ${job.status}`;
+    }
+    row.dataset.jobStatus = job.status;
+    ensureResult(job);
+    ensureRetry(job);
+  }
+
+  let attempts = 0;
+  async function poll() {
+    attempts += 1;
+    try {
+      const response = await fetch(row.dataset.jobStatusUrl, {
+        headers: {"Accept": "application/json"},
+        credentials: "same-origin",
+      });
+      if (!response.ok) return;
+      const payload = await response.json();
+      render(payload.job);
+      if (payload.job.terminal) return;
+    } catch (_err) {
+      if (attempts > 20) return;
+    }
+    window.setTimeout(poll, attempts < 10 ? 1500 : 4000);
+  }
+  if (!["done", "failed"].includes(row.dataset.jobStatus || "")) {
+    window.setTimeout(poll, 1000);
+  }
+})();
+</script>
+{% endif %}
+{% endblock %}
 {% block content %}
 <section class="workspace-head">
   <div>
@@ -195,25 +281,25 @@
 </section>
 
 {% if job_rows %}
-<section id="jobs" class="band">
+<section id="jobs" class="band" data-job-focus-id="{{ job_focus_id }}">
   <div class="section-row">
     <h2>Generation jobs</h2>
     <a class="small-link" href="/w/{{ org.slug }}/support">Open support</a>
   </div>
   <div class="list">
     {% for job in job_rows %}
-    <article class="row {% if job_focus_id == job.id %}shared-now{% endif %}">
+    <article class="row {% if job_focus_id == job.id %}shared-now{% endif %}" data-job-id="{{ job.id }}" data-job-status="{{ job.status }}" data-job-status-url="/w/{{ org.slug }}/jobs/{{ job.id }}/status">
       <div>
-        <strong>{{ job.summary }}</strong>
-        <p>{{ job.kind }} · {{ job.status }} · attempts {{ job.attempts }}{% if job.result_pack_title %} · result {{ job.result_pack_title }}{% endif %}{% if job.error %} · {{ job.error }}{% endif %}</p>
+        <strong data-job-summary>{{ job.summary }}</strong>
+        <p data-job-meta>{{ job.kind }} · {{ job.status }} · attempts {{ job.attempts }}{% if job.result_pack_title %} · result {{ job.result_pack_title }}{% endif %}{% if job.error %} · {{ job.error }}{% endif %}</p>
       </div>
-      <div class="pack-actions">
-        <span class="status-pill {{ job.status }}">{{ job.status }}</span>
+      <div class="pack-actions" data-job-actions>
+        <span class="status-pill {{ job.status }}" data-job-status>{{ job.status }}</span>
         {% if job.result_pack_id %}
-        <a class="button ghost" href="/w/{{ org.slug }}?result={{ job.result_pack_id }}#pack-{{ job.result_pack_id }}">Open result</a>
+        <a class="button ghost" data-job-result href="/w/{{ org.slug }}?result={{ job.result_pack_id }}#pack-{{ job.result_pack_id }}">Open result</a>
         {% endif %}
         {% if can_manage_workspace and job.status == "failed" %}
-        <form method="post" action="/w/{{ org.slug }}/jobs/{{ job.id }}/retry"><button class="secondary">Retry</button></form>
+        <form method="post" action="/w/{{ org.slug }}/jobs/{{ job.id }}/retry" data-job-retry><button class="secondary">Retry</button></form>
         {% endif %}
       </div>
     </article>

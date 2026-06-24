@@ -118,6 +118,15 @@ def test_signup_queues_initial_pack_until_worker_drains(tmp_path, monkeypatch):
     assert page.status_code == 200
     assert "Generation jobs" in page.text
     assert "queued" in page.text
+    assert f'data-job-id="{job["id"]}"' in page.text
+    assert f'/w/blue-plate/jobs/{job["id"]}/status' in page.text
+
+    queued_status = client.get(f"/w/blue-plate/jobs/{job['id']}/status")
+    assert queued_status.status_code == 200
+    queued_body = queued_status.json()["job"]
+    assert queued_body["status"] == "queued"
+    assert queued_body["terminal"] is False
+    assert queued_body["result_url"] is None
 
     assert jobs.drain(limit=1) == 1
     done = db.one("SELECT * FROM jobs WHERE id=?", (job["id"],))
@@ -126,6 +135,14 @@ def test_signup_queues_initial_pack_until_worker_drains(tmp_path, monkeypatch):
     assert done["attempts"] == 1
     assert done["result_pack_id"] == pack["id"]
     assert "Spring agnolotti" in pack["body_json"]
+
+    done_status = client.get(f"/w/blue-plate/jobs/{job['id']}/status")
+    assert done_status.status_code == 200
+    done_body = done_status.json()["job"]
+    assert done_body["status"] == "done"
+    assert done_body["terminal"] is True
+    assert done_body["result_pack_id"] == pack["id"]
+    assert done_body["result_url"] == f"/w/blue-plate?result={pack['id']}#pack-{pack['id']}"
 
     focused = client.get(res.headers["location"])
     assert "done" in focused.text
@@ -675,6 +692,14 @@ def test_failed_regeneration_job_can_retry_without_duplicate_pack(tmp_path, monk
     assert job["attempts"] == 1
     assert "model unavailable" in job["error"]
     assert db.one("SELECT COUNT(*) AS n FROM content_packs")["n"] == 1
+
+    failed_status = client.get(f"/w/blue-plate/jobs/{job['id']}/status")
+    assert failed_status.status_code == 200
+    failed_body = failed_status.json()["job"]
+    assert failed_body["status"] == "failed"
+    assert failed_body["terminal"] is True
+    assert failed_body["retry_url"] == f"/w/blue-plate/jobs/{job['id']}/retry"
+    assert "model unavailable" in failed_body["error"]
 
     page = client.get(f"/w/blue-plate?job={job['id']}#jobs")
     assert "Generation jobs" in page.text

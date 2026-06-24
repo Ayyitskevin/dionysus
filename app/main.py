@@ -1040,6 +1040,31 @@ def _require_active_pack(pack) -> None:
         raise HTTPException(status_code=400, detail="archived packs are read-only")
 
 
+def _job_status_payload(job: dict, slug: str, *, can_retry: bool = False) -> dict:
+    result_url = None
+    if job["result_pack_id"]:
+        result_url = f"/w/{slug}?result={job['result_pack_id']}#pack-{job['result_pack_id']}"
+    return {
+        "id": job["id"],
+        "kind": job["kind"],
+        "summary": job["summary"],
+        "status": job["status"],
+        "attempts": job["attempts"],
+        "error": job["error"],
+        "created_at": job["created_at"],
+        "updated_at": job["updated_at"],
+        "completed_at": job["completed_at"],
+        "source_pack_id": job["source_pack_id"],
+        "source_pack_title": job["source_pack_title"],
+        "result_pack_id": job["result_pack_id"],
+        "result_pack_title": job["result_pack_title"],
+        "result_url": result_url,
+        "retry_url": f"/w/{slug}/jobs/{job['id']}/retry"
+            if can_retry and job["status"] == "failed" else None,
+        "terminal": job["status"] in ("done", "failed"),
+    }
+
+
 @app.post("/w/{slug}/packs/{pack_id}/revise")
 async def revise_pack(request: Request, slug: str, pack_id: int,
                       title: str = Form(...), strategy: str = Form(...),
@@ -1103,6 +1128,18 @@ async def regenerate_pack(request: Request, slug: str, pack_id: int,
     job_id = jobs.enqueue_regenerate(
         pack["id"], feedback, actor_user_id=audit.actor_id(user))
     return RedirectResponse(f"/w/{slug}?job={job_id}#jobs", status_code=303)
+
+
+@app.get("/w/{slug}/jobs/{job_id}/status")
+async def job_status(request: Request, slug: str, job_id: int):
+    org, user = _require_workspace(request, slug)
+    job = jobs.get_for_org(job_id, org["id"])
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    member = _membership(user["id"], org["id"])
+    can_retry = bool(member and member["role"] in ("owner", "admin"))
+    return {"ok": True, "org": slug,
+            "job": _job_status_payload(job, slug, can_retry=can_retry)}
 
 
 @app.post("/w/{slug}/jobs/{job_id}/retry")
@@ -1352,6 +1389,17 @@ def _pack_api_payload(pack) -> dict:
         "markdown": pack_utils.markdown(pack),
         "body": pack_utils.body(pack),
     }
+
+
+@app.get("/api/mise/organizations/{slug}/jobs/{job_id}",
+         dependencies=[Depends(security.require_mise_token)])
+async def job_status_for_mise(slug: str, job_id: int):
+    org = _org_by_slug(slug)
+    job = jobs.get_for_org(job_id, org["id"])
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    return {"ok": True, "org": slug,
+            "job": _job_status_payload(job, slug, can_retry=False)}
 
 
 @app.get("/api/mise/organizations/{slug}/packs",

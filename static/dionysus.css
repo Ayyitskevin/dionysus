@@ -203,6 +203,7 @@ label { display: grid; gap: 0.4rem; font-size: 0.9rem; font-weight: 700; }
   align-items: center;
 }
 .pack-actions form { margin: 0; }
+.pack-actions form[data-job-retry] { min-width: 0; }
 .pack h3 { margin: 0 0 0.75rem; }
 .pack-grid {
   display: grid;
