@@ -9,7 +9,7 @@ os.environ["DIONYSUS_DATA_DIR"] = "/tmp/dionysus-test-data"
 os.environ["DIONYSUS_SECRET_KEY"] = "test-secret"
 os.environ["DIONYSUS_MISE_IMPORT_TOKEN"] = "mise-test"
 
-from app import db, security  # noqa: E402
+from app import db, generator, security  # noqa: E402
 from app.main import app  # noqa: E402
 
 
@@ -606,6 +606,66 @@ def test_approved_packs_cannot_be_archived(tmp_path, monkeypatch):
     assert archive.status_code == 400
     assert db.one("SELECT archived_at FROM content_packs WHERE id=?",
                   (pack["id"],))["archived_at"] is None
+
+
+def test_failed_regeneration_job_can_retry_without_duplicate_pack(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+    signup(client)
+    pack = db.one("SELECT * FROM content_packs")
+    original_regenerate = generator.regenerate_with_feedback
+
+    def failing_regenerate(*args, **kwargs):
+        raise RuntimeError("model unavailable")
+
+    monkeypatch.setattr(generator, "regenerate_with_feedback", failing_regenerate)
+    failed = client.post(
+        f"/w/blue-plate/packs/{pack['id']}/regenerate",
+        data={"feedback": "Make this more premium."},
+        follow_redirects=False,
+    )
+    job = db.one("SELECT * FROM jobs WHERE kind='regenerate_pack' ORDER BY id DESC LIMIT 1")
+    assert failed.status_code == 303
+    assert failed.headers["location"] == f"/w/blue-plate?job_failed={job['id']}#jobs"
+    assert job["status"] == "failed"
+    assert job["attempts"] == 1
+    assert "model unavailable" in job["error"]
+    assert db.one("SELECT COUNT(*) AS n FROM content_packs")["n"] == 1
+
+    page = client.get(f"/w/blue-plate?job_failed={job['id']}#jobs")
+    assert "Generation jobs" in page.text
+    assert "model unavailable" in page.text
+    assert f'/w/blue-plate/jobs/{job["id"]}/retry' in page.text
+
+    support = client.get("/w/blue-plate/support")
+    assert support.status_code == 200
+    assert "Generation jobs" in support.text
+    assert "1 failed jobs" in support.text
+
+    retry_failed = client.post(f"/w/blue-plate/jobs/{job['id']}/retry", follow_redirects=False)
+    still_failed = db.one("SELECT * FROM jobs WHERE id=?", (job["id"],))
+    assert retry_failed.status_code == 303
+    assert retry_failed.headers["location"] == f"/w/blue-plate?job_failed={job['id']}#jobs"
+    assert still_failed["status"] == "failed"
+    assert still_failed["attempts"] == 2
+    assert db.one("SELECT COUNT(*) AS n FROM content_packs")["n"] == 1
+
+    monkeypatch.setattr(generator, "regenerate_with_feedback", original_regenerate)
+    retry_success = client.post(f"/w/blue-plate/jobs/{job['id']}/retry", follow_redirects=False)
+    done = db.one("SELECT * FROM jobs WHERE id=?", (job["id"],))
+    assert retry_success.status_code == 303
+    assert done["status"] == "done"
+    assert done["attempts"] == 3
+    assert done["result_pack_id"]
+    assert retry_success.headers["location"] == (
+        f"/w/blue-plate?regenerated={done['result_pack_id']}#pack-{done['result_pack_id']}"
+    )
+    assert db.one("SELECT COUNT(*) AS n FROM content_packs")["n"] == 2
+    new_pack = db.one("SELECT * FROM content_packs WHERE id=?", (done["result_pack_id"],))
+    assert new_pack["source_pack_id"] == pack["id"]
+    assert new_pack["revision_note"] == "Make this more premium."
+    event = db.one("SELECT * FROM audit_events WHERE action='job.retried'")
+    assert event["entity_id"] == job["id"]
 
 
 def test_feedback_regeneration_respects_monthly_pack_limit(tmp_path, monkeypatch):
@@ -1208,7 +1268,7 @@ def test_cli_backup_creates_private_verified_snapshot(tmp_path, monkeypatch, cap
     assert cli.main(["backup", str(destination)]) == 0
     output = capsys.readouterr().out
     assert "backup\t" in output
-    assert "restore_check\tok\tintegrity=ok\tmigrations=6" in output
+    assert "restore_check\tok\tintegrity=ok\tmigrations=7" in output
 
     snapshots = list(destination.glob("dionysus-*.db"))
     assert len(snapshots) == 1
@@ -1225,7 +1285,7 @@ def test_cli_backup_creates_private_verified_snapshot(tmp_path, monkeypatch, cap
 
     assert cli.main(["verify-backup", str(snapshots[0])]) == 0
     verify_output = capsys.readouterr().out
-    assert "verify\tok\tintegrity=ok\tmigrations=6" in verify_output
+    assert "verify\tok\tintegrity=ok\tmigrations=7" in verify_output
 
 
 def test_workspace_surfaces_upgrade_prompt_for_locked_recipe(tmp_path, monkeypatch):

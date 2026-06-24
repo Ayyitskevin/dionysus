@@ -194,6 +194,31 @@
   </div>
 </section>
 
+{% if job_rows %}
+<section id="jobs" class="band">
+  <div class="section-row">
+    <h2>Generation jobs</h2>
+    <a class="small-link" href="/w/{{ org.slug }}/support">Open support</a>
+  </div>
+  <div class="list">
+    {% for job in job_rows %}
+    <article class="row {% if job_failed_id == job.id %}shared-now{% endif %}">
+      <div>
+        <strong>{{ job.summary }}</strong>
+        <p>{{ job.kind }} · {{ job.status }} · attempts {{ job.attempts }}{% if job.error %} · {{ job.error }}{% endif %}</p>
+      </div>
+      <div class="pack-actions">
+        <span class="status-pill {{ job.status }}">{{ job.status }}</span>
+        {% if can_manage_workspace and job.status == "failed" %}
+        <form method="post" action="/w/{{ org.slug }}/jobs/{{ job.id }}/retry"><button class="secondary">Retry</button></form>
+        {% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
 <section id="packs" class="band">
   <div class="section-row">
     <h2>Generated packs</h2>

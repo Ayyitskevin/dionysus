@@ -558,6 +558,11 @@ async def workspace(request: Request, slug: str):
         regenerated_pack_id = int(regenerated_pack_raw)
     except ValueError:
         regenerated_pack_id = 0
+    job_failed_raw = request.query_params.get("job_failed", "")
+    try:
+        job_failed_id = int(job_failed_raw)
+    except ValueError:
+        job_failed_id = 0
     archived_count = db.one("""SELECT COUNT(*) AS n FROM content_packs
                               WHERE org_id=? AND archived_at IS NOT NULL""",
                             (org["id"],))["n"]
@@ -589,8 +594,10 @@ async def workspace(request: Request, slug: str):
             p["id"]: f"{config.BASE_URL}/share/{p['share_token']}"
             for p in packs if p["share_token"]
         },
+        "job_rows": jobs.actionable_for_org(org["id"]),
         "shared_pack_id": shared_pack_id,
         "regenerated_pack_id": regenerated_pack_id,
+        "job_failed_id": job_failed_id,
         "can_manage_workspace": can_manage_workspace,
     })
 
@@ -724,7 +731,9 @@ async def support_dashboard(request: Request, slug: str):
         "shared_count": shared_count,
         "audit_count": audit_count,
         "audit_events": audit.recent_for_org(org["id"], limit=8),
-        "jobs_pending": jobs.pending_count(),
+        "jobs_pending": jobs.pending_count(org["id"]),
+        "jobs_failed": jobs.failed_count(org["id"]),
+        "recent_jobs": jobs.recent_for_org(org["id"], limit=8),
         "mise_bridge_armed": bool(config.MISE_IMPORT_TOKEN),
         "access_token_tail": org["access_token"][-6:],
     })
@@ -1082,28 +1091,52 @@ async def regenerate_pack(request: Request, slug: str, pack_id: int,
     if not plans.allowed_recipe(sub["plan"], pack["recipe_slug"]):
         raise HTTPException(status_code=402, detail="upgrade required for this recipe")
     _enforce_monthly_pack_limit(org, sub=sub)
-    regenerated = generator.regenerate_with_feedback(org, pack, feedback)
-    engine = regenerated["provenance"]["engine"]
-    new_pack_id = db.run("""INSERT INTO content_packs
-                            (org_id, campaign_id, recipe_id, title, body_json,
-                             ai_model, ai_draft_original, source_pack_id,
-                             revision_note)
-                            VALUES (?,?,?,?,?,?,?,?,?)""",
-                         (org["id"], pack["campaign_id"], pack["recipe_id"],
-                          regenerated["headline"], json.dumps(regenerated),
-                          engine, json.dumps(regenerated), pack["id"], feedback))
+    job_id = jobs.enqueue_regenerate(pack["id"], feedback)
+    job = jobs.get_for_org(job_id, org["id"])
+    if job and job["status"] == "done" and job["result_pack_id"]:
+        audit.log_event(
+            org["id"], "pack.regenerated",
+            actor_user_id=audit.actor_id(user), entity_type="content_pack",
+            entity_id=job["result_pack_id"],
+            summary=f"Regenerated {pack['title']} into a new draft.",
+            details={
+                "job_id": job_id,
+                "source_pack_id": pack["id"],
+                "source_status": pack["status"],
+                "pack_title": job["result_pack_title"],
+                "feedback": feedback,
+            })
+        return RedirectResponse(
+            f"/w/{slug}?regenerated={job['result_pack_id']}#pack-{job['result_pack_id']}",
+            status_code=303)
+    return RedirectResponse(f"/w/{slug}?job_failed={job_id}#jobs", status_code=303)
+
+
+@app.post("/w/{slug}/jobs/{job_id}/retry")
+async def retry_job(request: Request, slug: str, job_id: int):
+    org, user, _ = _require_owner(request, slug)
+    job = jobs.get_for_org(job_id, org["id"])
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    if job["status"] != "failed":
+        raise HTTPException(status_code=400, detail="only failed jobs can be retried")
+    _enforce_monthly_pack_limit(org)
+    jobs.retry(job_id)
+    refreshed = jobs.get_for_org(job_id, org["id"])
     audit.log_event(
-        org["id"], "pack.regenerated",
-        actor_user_id=audit.actor_id(user), entity_type="content_pack", entity_id=new_pack_id,
-        summary=f"Regenerated {pack['title']} into a new draft.",
+        org["id"], "job.retried",
+        actor_user_id=audit.actor_id(user), entity_type="job", entity_id=job_id,
+        summary=f"Retried {job['summary']}; status is {refreshed['status']}.",
         details={
-            "source_pack_id": pack["id"],
-            "source_status": pack["status"],
-            "pack_title": regenerated["headline"],
-            "feedback": feedback,
+            "kind": job["kind"],
+            "status": refreshed["status"],
+            "result_pack_id": refreshed["result_pack_id"],
         })
-    return RedirectResponse(
-        f"/w/{slug}?regenerated={new_pack_id}#pack-{new_pack_id}", status_code=303)
+    if refreshed["status"] == "done" and refreshed["result_pack_id"]:
+        return RedirectResponse(
+            f"/w/{slug}?regenerated={refreshed['result_pack_id']}#pack-{refreshed['result_pack_id']}",
+            status_code=303)
+    return RedirectResponse(f"/w/{slug}?job_failed={job_id}#jobs", status_code=303)
 
 
 @app.post("/w/{slug}/packs/{pack_id}/archive")

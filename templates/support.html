@@ -34,7 +34,7 @@
     <article class="support-stat">
       <span>Activity</span>
       <strong>{{ audit_count }}</strong>
-      <p>{{ jobs_pending }} queued or running jobs</p>
+      <p>{{ jobs_pending }} queued or running · {{ jobs_failed }} failed jobs</p>
     </article>
   </div>
 
@@ -73,6 +73,34 @@
       {% endif %}
     </section>
   </div>
+
+  <section class="band settings-band">
+    <div class="section-row">
+      <h2>Generation jobs</h2>
+      <a class="small-link" href="/w/{{ org.slug }}#jobs">Open workspace jobs</a>
+    </div>
+    <div class="list">
+      {% for job in recent_jobs %}
+      <article class="row">
+        <div>
+          <strong>{{ job.summary }}</strong>
+          <p>{{ job.kind }} · {{ job.status }} · attempts {{ job.attempts }}{% if job.result_pack_title %} · result {{ job.result_pack_title }}{% endif %}{% if job.error %} · {{ job.error }}{% endif %}</p>
+        </div>
+        <div class="pack-actions">
+          <span class="status-pill {{ job.status }}">{{ job.status }}</span>
+          {% if job.status == "failed" %}
+          <form method="post" action="/w/{{ org.slug }}/jobs/{{ job.id }}/retry"><button class="secondary">Retry</button></form>
+          {% endif %}
+        </div>
+      </article>
+      {% else %}
+      <div class="empty-state">
+        <h3>No jobs yet</h3>
+        <p>Generation and retry history will appear here.</p>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
 
   <section class="band settings-band">
     <div class="section-row">

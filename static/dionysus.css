@@ -582,7 +582,9 @@ button:disabled {
 }
 .status-pill.owner, .status-pill.accepted { color: var(--leaf); }
 .status-pill.admin, .status-pill.pending { color: var(--blue); }
-.status-pill.revoked { color: var(--tomato); }
+.status-pill.revoked, .status-pill.failed { color: var(--tomato); }
+.status-pill.done { color: var(--leaf); }
+.status-pill.running, .status-pill.queued { color: var(--gold); }
 .json-block {
   overflow: auto;
   border: 1px solid var(--line);
