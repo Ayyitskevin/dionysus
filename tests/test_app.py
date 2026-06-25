@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 os.environ["DIONYSUS_DATA_DIR"] = "/tmp/dionysus-test-data"
 os.environ["DIONYSUS_SECRET_KEY"] = "test-secret"
 os.environ["DIONYSUS_MISE_IMPORT_TOKEN"] = "mise-test"
+os.environ["DIONYSUS_STUDIO_MODE"] = "false"
 
 from app import db, generator, jobs, rate_limit, security  # noqa: E402
 from app.main import app  # noqa: E402

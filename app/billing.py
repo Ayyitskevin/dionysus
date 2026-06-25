@@ -36,6 +36,15 @@ def sync_trial_subscription(org_id: int, plan: str) -> None:
 
 
 def checkout_state(org) -> dict:
+    if config.STUDIO_MODE:
+        plan = config.STUDIO_OPERATOR_PLAN
+        return {
+            "configured": False,
+            "plan": plan,
+            "price_id": "",
+            "status": "active",
+            "plan_meta": plans.PLANS.get(plan, plans.PLANS["restaurant_growth"]),
+        }
     sub = db.one("SELECT * FROM subscriptions WHERE org_id=?", (org["id"],))
     plan = sub["plan"] if sub else org["plan"]
     return {

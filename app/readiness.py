@@ -1,4 +1,4 @@
-"""Production readiness checks for Dionysus deployments."""
+"""Production / studio readiness checks."""
 
 from urllib.parse import urlparse
 
@@ -7,14 +7,29 @@ from . import config
 PLACEHOLDER_SECRETS = {"", "change-me", "dev", "dev-dionysus-secret"}
 
 
-def checks() -> list[dict]:
+def studio_checks() -> list[dict]:
+    return [
+        {
+            "key": "studio_mode",
+            "ok": config.STUDIO_MODE,
+            "detail": "Dionysus runs as Mise operator service (no SaaS sales)",
+        },
+        {
+            "key": "mise_bridge",
+            "ok": bool(config.MISE_IMPORT_TOKEN),
+            "detail": "DIONYSUS_MISE_IMPORT_TOKEN arms print-pitch and argus-pack",
+        },
+    ]
+
+
+def production_checks() -> list[dict]:
     parsed = urlparse(config.BASE_URL)
     stripe_prices = {
         "restaurant_starter": config.STRIPE_PRICE_RESTAURANT_STARTER,
         "restaurant_growth": config.STRIPE_PRICE_RESTAURANT_GROWTH,
         "photographer_studio": config.STRIPE_PRICE_PHOTOGRAPHER_STUDIO,
     }
-    items = [
+    return [
         {
             "key": "secret_key",
             "ok": config.SECRET_KEY not in PLACEHOLDER_SECRETS,
@@ -51,12 +66,18 @@ def checks() -> list[dict]:
             "detail": "DIONYSUS_MISE_IMPORT_TOKEN is set for the Mise bridge",
         },
     ]
-    return items
+
+
+def checks() -> list[dict]:
+    if config.STUDIO_MODE:
+        return studio_checks()
+    return production_checks()
 
 
 def summary() -> dict:
     items = checks()
     return {
         "ready": all(item["ok"] for item in items),
+        "studio_mode": config.STUDIO_MODE,
         "checks": items,
     }

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from . import billing, db, jobs, plans
+from . import billing, config, db, jobs, plans
 
 log = logging.getLogger("dionysus.mise_hook")
 
@@ -44,9 +44,10 @@ def generate_from_argus(
     if not recipe:
         raise ValueError(f"recipe {slug} not found")
 
-    sub = billing.checkout_state(org)
-    if not plans.allowed_recipe(sub["plan"], recipe["slug"]):
-        raise ValueError(f"plan {sub['plan']} does not allow recipe {slug}")
+    if not config.STUDIO_MODE:
+        sub = billing.checkout_state(org)
+        if not plans.allowed_recipe(sub["plan"], recipe["slug"]):
+            raise ValueError(f"plan {sub['plan']} does not allow recipe {slug}")
 
     title = _campaign_title(
         mise_gallery_id=mise_gallery_id,

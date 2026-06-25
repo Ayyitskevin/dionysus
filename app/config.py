@@ -1,11 +1,15 @@
 """Dionysus configuration.
 
-The app is intentionally small and self-hostable like Mise: env-driven, SQLite,
-and dormant integrations until tokens are explicitly provisioned.
+Studio mode (default): Mise operator service — print-pitch + argus-pack APIs only.
+Set DIONYSUS_STUDIO_MODE=false to expose the legacy Platekit SaaS UI.
 """
 
 import os
 from pathlib import Path
+
+# Mise admin feature — no public signup, Stripe, or workspace UI
+STUDIO_MODE = os.environ.get("DIONYSUS_STUDIO_MODE", "true").lower() in ("1", "true", "yes")
+STUDIO_OPERATOR_PLAN = os.environ.get("DIONYSUS_STUDIO_OPERATOR_PLAN", "restaurant_growth")
 
 HOST = os.environ.get("DIONYSUS_HOST", "127.0.0.1")
 PORT = int(os.environ.get("DIONYSUS_PORT", "8450"))

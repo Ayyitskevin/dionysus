@@ -8,7 +8,12 @@ BRANCH="${DIONYSUS_DEPLOY_BRANCH:-main}"
 
 echo "==> pytest gate"
 if [[ -x "$ROOT/.venv/bin/pytest" ]]; then
-  "$ROOT/.venv/bin/python" -m pytest -q
+  "$ROOT/.venv/bin/python" -m pytest -q \
+    tests/test_studio_mode.py \
+    tests/test_print_pitch_api.py \
+    tests/test_mise_argus_hook.py \
+    tests/test_print_pitch.py \
+    tests/test_argus_packs.py
 else
   echo "WARN: .venv missing — run: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt" >&2
 fi

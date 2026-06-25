@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dionysus — Mise studio service</title>
+  <link rel="stylesheet" href="/static/dionysus.css">
+</head>
+<body class="marketing">
+  <main class="narrow stack-form" style="max-width:42rem;margin:3rem auto;padding:0 1rem">
+    <h1>Dionysus studio</h1>
+    <p class="muted">Operator service for Kevin Lee Photography — wired into Mise gallery admin. No public signup or billing.</p>
+    <ul>
+      <li><strong>Print pitch</strong> — Plutus <code>pitch.txt</code> enrichment</li>
+      <li><strong>Campaign packs</strong> — Argus vision → keyword captions via <code>argus-pack</code></li>
+    </ul>
+    <p class="muted">Demo org: <code>{{ demo_org }}</code> · Mise bridge: {{ "armed" if mise_bridge else "not configured" }}</p>
+    <p><a href="/healthz">healthz</a> · <a href="/readiness">readiness</a></p>
+  </main>
+</body>
+</html>

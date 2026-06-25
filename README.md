@@ -1,14 +1,12 @@
 # Dionysus / Platekit
 
-Photography AI SaaS for food, beverage, and restaurant content.
+Mise studio service for campaign copy and print-pitch enrichment.
 
-Dionysus is designed to synergize with Mise without becoming Mise:
+**Default: `DIONYSUS_STUDIO_MODE=true`** — no public signup, Stripe, or workspace UI.
+Kevin operates through Mise gallery admin; Dionysus exposes bearer-gated service APIs only.
 
-- Mise remains the operating system for Kevin Lee Photography: inquiries, clients,
-  proposals, contracts, invoices, galleries, proofing, usage rights, and delivery.
-- Dionysus is the subscription product around the shoot: restaurant owners and
-  photographers turn one food session into campaign briefs, shot lists, captions,
-  delivery-app copy, social exports, and retainer upsells.
+- **Mise** — galleries, clients, proofing, delivery, invoices
+- **Dionysus** — print pitch enrichment for Plutus `pitch.txt`, keyword campaign packs after Argus vision
 
 ## Product Shape
 
@@ -83,27 +81,18 @@ bash scripts/dogfood-plutus-pitch.sh [plutus_run_id]
 
 
 
-## SaaS Foundation
+## Studio mode (default)
 
-The current MVP includes the first paid-product boundary:
+| API | Purpose |
+|-----|---------|
+| `POST /api/mise/organizations/{slug}/print-pitch` | Plutus client email enrichment |
+| `POST /api/mise/organizations/{slug}/argus-pack` | Campaign pack draft after Argus run |
+| `GET /api/mise/organizations/{slug}/packs` | Approved packs for Mise client admin |
 
-- Account signup and login with PBKDF2 password hashes
-- Workspace ownership through `organization_members`
-- Trial subscription rows per workspace
-- Plan-gated content recipes and monthly pack limits
-- Billing page that stays in trial mode until Stripe keys and price IDs are configured
+Homelab: `ops/homelab.env.example`, `scripts/deploy-homelab.sh`, `scripts/dogfood-plutus-pitch.sh`
 
-Stripe checkout now creates real subscription Checkout Sessions when
-`DIONYSUS_STRIPE_SECRET_KEY` and the active plan's Stripe price ID are configured.
-`POST /stripe/webhook` verifies Stripe signatures with
-`DIONYSUS_STRIPE_WEBHOOK_SECRET` and syncs subscription status from Stripe events.
-
-Production starting points:
-
-- `ops/env.example`
-- `ops/dionysus.service`
-- `ops/dionysus-worker.service`
-- `ops/backup-restore.md`
+Legacy Platekit SaaS UI (signup, billing, `/w/{slug}`) remains in the tree but is **gated off**
+when `DIONYSUS_STUDIO_MODE=true`. Set `DIONYSUS_STUDIO_MODE=false` only for a public SaaS deploy.
 
 
 

@@ -1,4 +1,7 @@
-"""Dionysus / Platekit — Photography AI SaaS for restaurants and photographers."""
+"""Dionysus — Mise studio service (print pitch + campaign packs).
+
+Legacy Platekit SaaS UI is gated off when DIONYSUS_STUDIO_MODE=true (default).
+"""
 
 from contextlib import asynccontextmanager
 import csv
@@ -16,7 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import (
     audit, billing, config, db, generator, jobs, mise_hook, packs as pack_utils,
-    plans, rate_limit, readiness, recipes, security,
+    plans, rate_limit, readiness, recipes, security, studio_gate,
 )
 from .render import ROOT, templates
 
@@ -33,6 +36,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Dionysus", version="0.2.0", docs_url=None,
               redoc_url=None, openapi_url=None, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+app.middleware("http")(studio_gate.studio_mode_middleware)
 
 
 def _csrf_protected_path(path: str) -> bool:
@@ -98,10 +102,12 @@ async def healthz():
         "jobs_pending": jobs.pending_count(),
         "jobs_failed": jobs.failed_count(),
         "queue": jobs.queue_stats(),
+        "studio_mode": config.STUDIO_MODE,
         "studio": {
             "mise_bridge_armed": bool(config.MISE_IMPORT_TOKEN),
             "demo_org": "blue-plate",
             "print_pitch_path": "/api/mise/organizations/{slug}/print-pitch",
+            "argus_pack_path": "/api/mise/organizations/{slug}/argus-pack",
         },
     }
 
@@ -212,6 +218,15 @@ def _login_destination(user_id: int, raw_next: str) -> tuple[str, str | None]:
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
+    if config.STUDIO_MODE:
+        return templates.TemplateResponse(
+            request,
+            "studio_status.html",
+            {
+                "demo_org": "blue-plate",
+                "mise_bridge": bool(config.MISE_IMPORT_TOKEN),
+            },
+        )
     return templates.TemplateResponse(request, "home.html", _home_context(request))
 
 
