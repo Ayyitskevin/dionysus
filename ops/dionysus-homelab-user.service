@@ -1,0 +1,14 @@
+[Unit]
+Description=Dionysus Platekit API for homelab pitch hand-off (:8450)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/ai-workspace/dionysus
+EnvironmentFile=%h/ai-workspace/dionysus/.env
+ExecStart=%h/ai-workspace/dionysus/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8450
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

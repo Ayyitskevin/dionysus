@@ -98,6 +98,11 @@ async def healthz():
         "jobs_pending": jobs.pending_count(),
         "jobs_failed": jobs.failed_count(),
         "queue": jobs.queue_stats(),
+        "studio": {
+            "mise_bridge_armed": bool(config.MISE_IMPORT_TOKEN),
+            "demo_org": "blue-plate",
+            "print_pitch_path": "/api/mise/organizations/{slug}/print-pitch",
+        },
     }
 
 

@@ -60,6 +60,27 @@ requests never create public share links. When Mise's Argus callback fires, it c
 `POST argus-pack` with `argus_run_id` (and optional `mise_gallery_id`) to draft
 keyword-enriched captions without coupling the apps.
 
+### Plutus studio pitch hand-off (homelab :8450)
+
+Plutus homelab (`:8030`) enriches `pitch.txt` via:
+
+```text
+POST /api/mise/organizations/{slug}/print-pitch
+Authorization: Bearer <DIONYSUS_MISE_IMPORT_TOKEN>
+```
+
+Wire from the Plutus tree: `scripts/wire-dionysus-homelab.sh` (sets
+`PLUTUS_DIONYSUS_URL`, `PLUTUS_DIONYSUS_TOKEN`, `PLUTUS_DIONYSUS_ORG_SLUG`).
+
+Homelab bring-up in this repo:
+
+```bash
+cp ops/homelab.env.example .env   # set DIONYSUS_MISE_IMPORT_TOKEN
+bash scripts/install-homelab-service.sh
+bash scripts/deploy-homelab.sh
+bash scripts/dogfood-plutus-pitch.sh [plutus_run_id]
+```
+
 
 
 ## SaaS Foundation
