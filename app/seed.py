@@ -1,8 +1,12 @@
-"""Seed workspaces for production demos and end-to-end bridge checks."""
+"""Provision a demo subject (org) for end-to-end Mise bridge checks.
 
-import os
+In the stateless worker, an org is just the *subject* the Mise APIs operate on by
+slug. This CLI command creates/refreshes that subject and generates one approved
+pack so Mise can read it immediately. There is no signup/identity here — Mise
+owns identity.
+"""
 
-from . import billing, config, db, jobs, packs as pack_utils, security
+from . import config, db, jobs, security
 
 
 DEMO = {
@@ -28,26 +32,15 @@ DEMO = {
 
 
 def seed_demo_workspace() -> dict:
-    """Create or refresh the Blue Plate demo loop.
+    """Create or refresh the Blue Plate demo subject + one approved pack.
 
-    The command is intentionally idempotent: it updates the workspace profile,
-    fills in missing inputs, generates one pack if needed, then approves and
-    shares the newest pack so Mise can read it immediately.
+    Idempotent: updates the org profile, fills missing inputs, generates one pack
+    if needed, then approves the newest pack so Mise can read it immediately.
     """
     db.migrate()
-    password = os.environ.get("DIONYSUS_DEMO_PASSWORD", security.new_token(24))
-    user = db.one("SELECT * FROM users WHERE email=?", (DEMO["email"],))
     with db.tx() as con:
-        if user:
-            user_id = user["id"]
-        else:
-            cur = con.execute("""INSERT INTO users (email, name, password_hash)
-                                 VALUES (?,?,?)""",
-                              (DEMO["email"], DEMO["name"],
-                               security.hash_password(password)))
-            user_id = cur.lastrowid
-
-        org = db.one("SELECT * FROM organizations WHERE slug=?", (DEMO["slug"],))
+        org = con.execute("SELECT * FROM organizations WHERE slug=?",
+                          (DEMO["slug"],)).fetchone()
         if org:
             org_id = org["id"]
             con.execute("""UPDATE organizations
@@ -67,10 +60,6 @@ def seed_demo_workspace() -> dict:
                                security.new_token(), DEMO["market"],
                                DEMO["service_mix"], DEMO["brand_voice"]))
             org_id = cur.lastrowid
-
-        con.execute("""INSERT OR IGNORE INTO organization_members
-                       (org_id, user_id, role) VALUES (?,?, 'owner')""",
-                    (org_id, user_id))
 
         for name, category, notes in DEMO["items"]:
             exists = con.execute(
@@ -97,7 +86,6 @@ def seed_demo_workspace() -> dict:
                                DEMO["campaign_goal"], DEMO["launch_date"]))
             campaign_id = cur.lastrowid
 
-    billing.sync_trial_subscription(org_id, DEMO["plan"])
     recipe = db.one("SELECT * FROM content_recipes WHERE slug=?", (DEMO["recipe_slug"],))
     if not recipe:
         raise RuntimeError("monthly-retainer recipe is missing")
@@ -117,10 +105,4 @@ def seed_demo_workspace() -> dict:
     db.run("""UPDATE content_packs SET status='approved',
               approved_at=COALESCE(approved_at, datetime('now')),
               updated_at=datetime('now') WHERE id=?""", (pack["id"],))
-    token = pack_utils.ensure_share_token(pack["id"])
-    return {
-        "org_id": org_id,
-        "slug": DEMO["slug"],
-        "pack_id": pack["id"],
-        "share_url": f"{config.BASE_URL}/share/{token}",
-    }
+    return {"org_id": org_id, "slug": DEMO["slug"], "pack_id": pack["id"]}

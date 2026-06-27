@@ -2,8 +2,9 @@
 
 Mise studio service for campaign copy and print-pitch enrichment.
 
-**Default: `DIONYSUS_STUDIO_MODE=true`** — no public signup, Stripe, or workspace UI.
-Kevin operates through Mise gallery admin; Dionysus exposes bearer-gated service APIs only.
+Dionysus is a **stateless content worker** for Mise — no signup, billing, or
+workspace UI. Kevin operates through Mise gallery admin; Dionysus exposes
+bearer-gated service APIs only. See [`RETIRE.md`](RETIRE.md) for the worker model.
 
 - **Mise** — galleries, clients, proofing, delivery, invoices
 - **Dionysus** — print pitch enrichment for Plutus `pitch.txt`, keyword campaign packs after Argus vision
@@ -98,18 +99,25 @@ bash scripts/dogfood-plutus-pitch.sh [plutus_run_id]
 
 
 
-## Studio mode (default)
+## Worker APIs
+
+All bearer-gated with `DIONYSUS_MISE_IMPORT_TOKEN`:
 
 | API | Purpose |
 |-----|---------|
 | `POST /api/mise/organizations/{slug}/print-pitch` | Plutus client email enrichment |
 | `POST /api/mise/organizations/{slug}/argus-pack` | Campaign pack draft after Argus run |
-| `GET /api/mise/organizations/{slug}/packs` | Approved packs for Mise client admin |
+| `GET /api/mise/organizations/{slug}/packs` | Approved packs for Mise (`?include_drafts=true` for all) |
+| `GET /api/mise/organizations/{slug}/latest-pack` | Most recent pack |
+| `GET /api/mise/organizations/{slug}/jobs/{job_id}` | Draft job status |
+| `POST /api/mise/organizations/{slug}/packs/{pack_id}/human-edited` | Mise marks a draft human-edited so the worker never overwrites it |
+
+Provision a subject (org) via the CLI: `python -m app.cli seed-demo`.
 
 Homelab: `ops/homelab.env.example`, `scripts/deploy-homelab.sh`, `scripts/dogfood-plutus-pitch.sh`
 
-Legacy Platekit SaaS UI (signup, billing, `/w/{slug}`) remains in the tree but is **gated off**
-when `DIONYSUS_STUDIO_MODE=true`. Set `DIONYSUS_STUDIO_MODE=false` only for a public SaaS deploy.
+The SaaS UI/auth (signup, login, billing, `/w/{slug}`, public share) was removed
+when Dionysus converged to a stateless worker; see [`RETIRE.md`](RETIRE.md).
 
 
 
