@@ -1,5 +1,10 @@
 # Dionysus Production Bring-Up
 
+> **Legacy / obsolete.** This runbook describes the removed public-SaaS
+> deployment (Stripe, signup/login, `/w/` workspaces). Dionysus is now a
+> stateless Mise content worker — deploy it via the homelab path
+> (`ops/homelab.env.example`, `scripts/deploy-homelab.sh`). See `RETIRE.md`.
+
 This is the chronological deployment path for test-mode launch.
 
 ## 1. Provision the host

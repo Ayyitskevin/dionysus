@@ -74,18 +74,23 @@ once the SaaS routes are gone); session/CSRF/password parts of `security`; the
 
 ## Phased strip plan (each phase = one independently-green draft PR)
 
-1. **Billing / Stripe** — remove `billing.py`, `plans.py`, Stripe config,
-   `/stripe/webhook`, `subscriptions` table, billing/pricing templates and the
-   readiness billing checks. (Already gated off in studio mode — lowest risk.)
-2. **SaaS UI + auth** — remove signup/login/invite/workspace/share routes and
-   templates, `users` / `organization_members` / `workspace_invites` tables,
-   session/CSRF/password code, `seed.py`, `studio_gate.py`. Keep the bearer
-   token + its rate limiter.
+1. ✅ **Billing / Stripe** *(done)* — removed the Stripe payment integration
+   (`/stripe/webhook`, checkout), Stripe config, the `stripe` dep, billing/pricing
+   templates and readiness checks. `billing.py` kept only `checkout_state` +
+   `sync_trial_subscription` (local plan); `subscriptions` table retained for now.
+2. ✅ **SaaS UI + auth** *(done)* — removed the signup/login/logout/invite/
+   workspace/settings/support/share/pricing routes and templates, `studio_gate`,
+   session/CSRF/password code (`security` trimmed to the bearer token), and
+   dropped the `users` / `organization_members` / `workspace_invites` tables.
+   `seed.py` is now CLI subject-provisioning. The human-edit setter moved to a
+   bearer-gated Mise endpoint (`POST …/packs/{id}/human-edited`).
 3. **Audit log** — remove `audit_events` + `audit.py` (Mise owns the audit
-   trail); keep lightweight structured run logs.
+   trail); keep lightweight structured run logs. (`audit_events` lost its `users`
+   FK in phase 2; the only remaining writer is the unreachable regenerate path.)
 4. **De-own business inputs** — accept menu/brand inputs in the request payload;
    reduce `organizations` to a minimal subject record; treat `campaigns` purely
-   as a correlation handle.
+   as a correlation handle. Removing `STUDIO_MODE` + `billing.py`/`plans.py`/
+   `subscriptions` belongs here (now only used by `mise_hook` recipe selection).
 5. **Run-cache hygiene** — document/prune `content_packs` as a TTL'd cache, not a
    store of record.
 

@@ -1,16 +1,22 @@
-"""Studio mode — SaaS routes gated, Mise APIs stay live."""
+"""Studio mode — removed SaaS routes 404, Mise APIs stay live."""
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app import config
+from app import config, db
 from app.main import app
 
 
 @pytest.fixture(autouse=True)
-def _studio(monkeypatch):
+def _studio(tmp_path, monkeypatch):
+    # Self-contained: /healthz and /readiness touch the DB, so set up a tmp one
+    # rather than relying on another module having migrated first.
+    monkeypatch.setenv("DIONYSUS_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "dionysus.db")
     monkeypatch.setattr(config, "STUDIO_MODE", True)
     monkeypatch.setattr(config, "MISE_IMPORT_TOKEN", "mise-test")
+    db.migrate()
 
 
 @pytest.fixture()

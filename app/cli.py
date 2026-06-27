@@ -36,7 +36,7 @@ def main(argv: list[str] | None = None) -> int:
             print(USAGE)
             return 2
         result = seed.seed_demo_workspace()
-        print("seeded {slug} pack={pack_id} share={share_url}".format(**result))
+        print("seeded {slug} pack={pack_id}".format(**result))
         return 0
 
     if command == "check-production":

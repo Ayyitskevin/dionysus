@@ -1,6 +1,7 @@
 """Argus-enriched content pack generation (mock HTTP only)."""
 
 from app import argus, generator
+from tests.test_app import configure_tmp_db
 
 
 def test_summarize_export_extracts_keywords_and_heroes():
@@ -25,7 +26,8 @@ def test_summarize_export_extracts_keywords_and_heroes():
     assert len(ctx["hero_frames"]) == 1
 
 
-def test_build_pack_uses_argus_context():
+def test_build_pack_uses_argus_context(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)  # build_pack reads menu_items from the DB
     org = {"id": 1, "name": "Blue Plate", "audience": "restaurant", "brand_voice": "warm"}
     campaign = {"title": "June pack", "goal": "fill tables"}
     recipe = {

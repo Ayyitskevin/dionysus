@@ -1,5 +1,10 @@
 # Flow Deployment Status
 
+> **Legacy / obsolete.** References the removed SaaS surface (Stripe webhook,
+> `/w/` workspaces). Dionysus is now a stateless Mise content worker; see
+> `RETIRE.md` and the homelab deploy scripts.
+
+
 Current live URL:
 
 ```text

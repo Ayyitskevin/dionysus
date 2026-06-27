@@ -19,7 +19,6 @@ DATA_DIR = Path(os.environ.get("DIONYSUS_DATA_DIR", Path.cwd() / "data"))
 DB_PATH = DATA_DIR / "dionysus.db"
 
 SECRET_KEY = os.environ.get("DIONYSUS_SECRET_KEY", "dev-dionysus-secret")
-ADMIN_PASSWORD = os.environ.get("DIONYSUS_ADMIN_PASSWORD", "dev")
 
 MISE_IMPORT_TOKEN = os.environ.get("DIONYSUS_MISE_IMPORT_TOKEN", "")
 
