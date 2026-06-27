@@ -259,19 +259,37 @@ def _strip_fences(text: str) -> str:
     return cleaned.strip()
 
 
-def _parse_model_pack(text: str) -> dict | None:
-    """Parse a model reply into {strategy, captions}, tolerating fenced JSON."""
+def _candidate_objects(text: str):
+    """Yield JSON dicts found in a model reply: the whole (fenced) reply first,
+    then any balanced {...} objects via raw_decode so trailing/leading prose —
+    even prose that itself contains braces — does not defeat extraction."""
     stripped = _strip_fences(text)
-    candidates = [text, stripped]
-    if "{" in stripped and "}" in stripped:
-        candidates.append(stripped[stripped.find("{"): stripped.rfind("}") + 1])
-    for candidate in candidates:
+    for whole in (stripped, text):
         try:
-            data = json.loads(candidate)
+            obj = json.loads(whole)
         except (json.JSONDecodeError, TypeError):
             continue
-        if not isinstance(data, dict):
+        if isinstance(obj, dict):
+            yield obj
+    decoder = json.JSONDecoder()
+    idx = 0
+    while True:
+        brace = stripped.find("{", idx)
+        if brace == -1:
+            return
+        try:
+            obj, end = decoder.raw_decode(stripped, brace)
+        except json.JSONDecodeError:
+            idx = brace + 1
             continue
+        idx = end
+        if isinstance(obj, dict):
+            yield obj
+
+
+def _parse_model_pack(text: str) -> dict | None:
+    """Parse a model reply into {strategy, captions}, tolerating fences/prose."""
+    for data in _candidate_objects(text):
         strategy = str(data.get("strategy") or "").strip()
         captions = _text_list(data.get("captions"))[:_MAX_MODEL_CAPTIONS]
         if strategy and captions:

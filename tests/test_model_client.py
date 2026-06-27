@@ -78,11 +78,43 @@ def test_no_auth_header_without_key(monkeypatch):
     assert seen["auth"] is None
 
 
+def test_request_carries_sampling_params_and_overrides(monkeypatch):
+    _enable(monkeypatch)
+    monkeypatch.setattr(config, "MODEL_TEMPERATURE", 0.4)
+    monkeypatch.setattr(config, "MODEL_MAX_TOKENS", 800)
+    bodies = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    client = _mock_client(handler)
+    # defaults flow from config
+    model_client.complete([{"role": "user", "content": "hi"}], client=client)
+    assert bodies[-1]["temperature"] == 0.4
+    assert bodies[-1]["max_tokens"] == 800
+    # explicit per-call overrides flow through, including falsy values (temperature=0)
+    model_client.complete([{"role": "user", "content": "hi"}],
+                          temperature=0, max_tokens=128, client=client)
+    assert bodies[-1]["temperature"] == 0
+    assert bodies[-1]["max_tokens"] == 128
+
+
 def test_http_error_returns_none(monkeypatch):
     _enable(monkeypatch)
 
     def handler(request):
         return httpx.Response(500, text="boom")
+
+    assert model_client.complete([{"role": "user", "content": "hi"}],
+                                 client=_mock_client(handler)) is None
+
+
+def test_timeout_returns_none(monkeypatch):
+    _enable(monkeypatch)
+
+    def handler(request):
+        raise httpx.ReadTimeout("timed out")
 
     assert model_client.complete([{"role": "user", "content": "hi"}],
                                  client=_mock_client(handler)) is None

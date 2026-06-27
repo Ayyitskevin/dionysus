@@ -35,6 +35,10 @@ def configure_tmp_db(tmp_path, monkeypatch):
     from app import config
     config.DATA_DIR = tmp_path
     config.DB_PATH = tmp_path / "dionysus.db"
+    # Self-contained: STUDIO_MODE is read once at import (default True). Without
+    # this, the SaaS routes (signup) 404 unless test_app is collected first, so
+    # other test modules would pass only by alphabetical collection-order luck.
+    config.STUDIO_MODE = False
     config.MISE_IMPORT_TOKEN = "mise-test"
     config.BASE_URL = "http://localhost:8450"
     config.COOKIE_SECURE = False

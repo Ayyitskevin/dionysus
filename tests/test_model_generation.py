@@ -4,7 +4,7 @@ import json
 
 from fastapi.testclient import TestClient
 
-from app import config, db, generator, model_client
+from app import config, db, generator, jobs, model_client
 from app.main import app
 from tests.test_app import configure_tmp_db, signup
 
@@ -26,6 +26,13 @@ def test_parse_model_pack_fenced_json():
 
 def test_parse_model_pack_with_surrounding_prose():
     text = 'Sure! Here is the JSON: {"strategy": "S", "captions": ["c"]} hope it helps'
+    assert generator._parse_model_pack(text) == {"strategy": "S", "captions": ["c"]}
+
+
+def test_parse_model_pack_ignores_trailing_prose_with_braces():
+    # The object is followed by prose that itself contains a brace; raw_decode
+    # must still recover the leading object instead of over-spanning to the last }.
+    text = 'Here: {"strategy": "S", "captions": ["c"]} and also {a note}'
     assert generator._parse_model_pack(text) == {"strategy": "S", "captions": ["c"]}
 
 
@@ -97,6 +104,58 @@ def test_generate_falls_back_when_model_fails(tmp_path, monkeypatch):
     body = json.loads(pack["body_json"])
     assert body["provenance"]["engine"] != "dionysus-local-model"
     assert pack["ai_model"] == body["provenance"]["engine"]
+
+
+def test_generate_falls_back_when_model_raises(tmp_path, monkeypatch):
+    # The contract's load-bearing guarantee: an exception in drafting must NOT
+    # crash the job; it falls back to the deterministic pack and writes it.
+    configure_tmp_db(tmp_path, monkeypatch)
+    _enable_model(monkeypatch)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(model_client, "complete", boom)
+    client = TestClient(app)
+    signup(client)
+
+    assert jobs.failed_count() == 0
+    pack = db.one("SELECT * FROM content_packs ORDER BY id DESC LIMIT 1")
+    body = json.loads(pack["body_json"])
+    assert body["provenance"]["engine"] != "dionysus-local-model"
+    assert pack["ai_model"] == body["provenance"]["engine"]
+
+
+def test_generate_falls_back_on_unparseable_reply(tmp_path, monkeypatch):
+    # 200 OK but the model returned prose, not JSON -> deterministic fallback.
+    configure_tmp_db(tmp_path, monkeypatch)
+    _enable_model(monkeypatch)
+
+    def fake_complete(messages, **kwargs):
+        return {"text": "I cannot help with that", "model": "llama3.1:8b",
+                "latency_ms": 10, "cost_usd": 0.0}
+
+    monkeypatch.setattr(model_client, "complete", fake_complete)
+    client = TestClient(app)
+    signup(client)
+
+    pack = db.one("SELECT * FROM content_packs ORDER BY id DESC LIMIT 1")
+    body = json.loads(pack["body_json"])
+    assert body["provenance"]["engine"] != "dionysus-local-model"
+
+
+def test_healthz_never_leaks_api_key(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "MODEL_ENDPOINT", "http://local/v1")
+    monkeypatch.setattr(config, "MODEL_NAME", "llama3.1:8b")
+    monkeypatch.setattr(config, "MODEL_API_KEY", "super-secret-key")
+    client = TestClient(app)
+    res = client.get("/healthz")
+    assert res.status_code == 200
+    assert "super-secret-key" not in res.text
+    # the model block exposes only non-secret status, never the key/endpoint URL
+    assert res.json()["model"] == {
+        "enabled": True, "name": "llama3.1:8b", "endpoint_configured": True}
 
 
 def test_generate_skips_model_when_disabled(tmp_path, monkeypatch):
