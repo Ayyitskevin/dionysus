@@ -155,3 +155,8 @@ python -m app.cli rate-limits --window 900 --limit 20
 ```bash
 pytest
 ```
+
+CI (`.github/workflows/ci.yml`) runs the suite on every push and pull request.
+It is **mock-only and reproducible** — a guard step fails the build if
+`DIONYSUS_MODEL_ENDPOINT` or `DIONYSUS_ARGUS_URL` is set, so there are no live
+model or Argus calls.
