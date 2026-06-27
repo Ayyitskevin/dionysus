@@ -113,6 +113,12 @@ when `DIONYSUS_STUDIO_MODE=true`. Set `DIONYSUS_STUDIO_MODE=false` only for a pu
 
 
 
+## Retire-readiness
+
+Dionysus is a **stateless content worker** for Mise; see [`RETIRE.md`](RETIRE.md)
+for the map of what is engine vs. authoritative SaaS state, the phased plan to
+strip the SaaS layer, and the path to fully absorb the worker into Mise.
+
 ## Production Readiness
 
 Use the deployment runbook before putting a domain in front of the app:
