@@ -9,6 +9,7 @@ import datetime as dt
 import io
 import json
 import logging
+import time
 from urllib.parse import quote, urlencode, urlparse
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
@@ -18,8 +19,9 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import (
-    audit, billing, config, db, generator, jobs, mise_hook, packs as pack_utils,
-    plans, rate_limit, readiness, recipes, security, studio_gate,
+    audit, billing, config, contract, db, generator, jobs, mise_hook,
+    packs as pack_utils, plans, rate_limit, readiness, recipes, security,
+    studio_gate,
 )
 from .render import ROOT, templates
 
@@ -1486,6 +1488,7 @@ def _pack_api_payload(pack) -> dict:
     share_url = None
     if pack["share_token"]:
         share_url = f"{config.BASE_URL}/share/{pack['share_token']}"
+    body = pack_utils.body(pack)
     return {
         "id": pack["id"],
         "title": pack["title"],
@@ -1501,7 +1504,11 @@ def _pack_api_payload(pack) -> dict:
         "revision_note": pack["revision_note"],
         "archived_at": pack["archived_at"],
         "markdown": pack_utils.markdown(pack),
-        "body": pack_utils.body(pack),
+        "body": body,
+        "contract": contract.envelope(
+            contract.drafts_from_pack(body, title=pack["title"]),
+            model=pack["ai_model"] or contract.LOCAL_MODEL,
+        ),
     }
 
 
@@ -1598,16 +1605,23 @@ async def mise_print_pitch(slug: str, request: Request):
         raise HTTPException(status_code=400, detail="gallery_theme must be a string")
     from . import print_pitch
 
+    start = time.perf_counter()
+    pitch = print_pitch.build_print_pitch(
+        gallery_name=gallery_name.strip(),
+        bundles=bundles,
+        photo_count=photo_count,
+        estimated_total_cents=estimated_total_cents,
+        gallery_theme=(gallery_theme or "").strip() or None,
+        argus_run_id=argus_run_id,
+    )
+    latency_ms = int((time.perf_counter() - start) * 1000)
     return {
         "ok": True,
         "org": slug,
-        **print_pitch.build_print_pitch(
-            gallery_name=gallery_name.strip(),
-            bundles=bundles,
-            photo_count=photo_count,
-            estimated_total_cents=estimated_total_cents,
-            gallery_theme=(gallery_theme or "").strip() or None,
-            argus_run_id=argus_run_id,
+        **pitch,
+        "contract": contract.envelope(
+            contract.drafts_from_print_pitch(pitch),
+            latency_ms=latency_ms,
         ),
     }
 
