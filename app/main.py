@@ -1210,7 +1210,7 @@ async def revise_pack(request: Request, slug: str, pack_id: int,
     if not any(revised[key] for key in ("shot_list", "captions", "exports", "upsells")):
         raise HTTPException(status_code=400, detail="at least one pack section is required")
     db.run("""UPDATE content_packs
-              SET title=?, body_json=?, updated_at=datetime('now')
+              SET title=?, body_json=?, human_edited=1, updated_at=datetime('now')
               WHERE id=?""", (title, json.dumps(revised), pack_id))
     audit.log_event(
         org["id"], "pack.revised",
@@ -1508,6 +1508,7 @@ def _pack_api_payload(pack) -> dict:
         "source_pack_id": pack["source_pack_id"],
         "revision_note": pack["revision_note"],
         "archived_at": pack["archived_at"],
+        "human_edited": bool(pack["human_edited"]),
         "markdown": pack_utils.markdown(pack),
         "body": body,
         "contract": contract.envelope_for_pack(
