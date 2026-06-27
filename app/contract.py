@@ -90,6 +90,18 @@ def drafts_from_pack(body: dict, *, title: str | None = None) -> list[dict]:
     return drafts
 
 
+def envelope_for_pack(body: dict, *, title: str | None = None,
+                      ai_model: str | None = None) -> dict:
+    """Build the envelope for a stored pack, reading model/latency/cost from its
+    provenance when a local model produced it (else local-draft defaults)."""
+    prov = (body or {}).get("provenance") or {}
+    model = prov.get("model") or ai_model or LOCAL_MODEL
+    latency_ms = prov.get("latency_ms") or 0
+    cost_usd = prov.get("cost_usd") or 0.0
+    return envelope(drafts_from_pack(body, title=title), model=model,
+                    latency_ms=latency_ms, cost_usd=cost_usd)
+
+
 def drafts_from_print_pitch(pitch: dict) -> list[dict]:
     """Map a print-pitch body onto contract drafts (intro + bundle blurbs)."""
     pitch = pitch or {}

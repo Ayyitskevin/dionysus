@@ -58,6 +58,23 @@ requests never create public share links. When Mise's Argus callback fires, it c
 `POST argus-pack` with `argus_run_id` (and optional `mise_gallery_id`) to draft
 keyword-enriched captions without coupling the apps.
 
+### Local content model (optional)
+
+Generation can call a **local** OpenAI-compatible endpoint for draft text
+(Ollama / llama.cpp / vLLM / LM Studio). When unset, the deterministic templates
+are used — so there is no cloud dependency and CI runs offline.
+
+```bash
+DIONYSUS_MODEL_ENDPOINT=http://localhost:11434/v1   # /chat/completions is appended
+DIONYSUS_MODEL_NAME=llama3.1:8b
+DIONYSUS_MODEL_API_KEY=        # optional bearer for the local endpoint
+DIONYSUS_MODEL_TIMEOUT=30
+```
+
+On any error or timeout, generation falls back to the deterministic draft and
+never crashes Mise's path. Every draft stays a reversible draft a human accepts;
+`cost_usd` is `0.0` for local inference and the run reports `model`/`latency_ms`.
+
 ### Plutus studio pitch hand-off (homelab :8450)
 
 Plutus homelab (`:8030`) enriches `pitch.txt` via:
