@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Enforce mock-only CI (no live model/network endpoints)
+        run: |
+          if [ -n "${DIONYSUS_MODEL_ENDPOINT:-}" ] || [ -n "${DIONYSUS_ARGUS_URL:-}" ]; then
+            echo "CI must be mock-only: DIONYSUS_MODEL_ENDPOINT / DIONYSUS_ARGUS_URL must be unset." >&2
+            exit 1
+          fi
+      - name: Run tests
+        run: pytest -q
