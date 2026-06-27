@@ -5,4 +5,3 @@ itsdangerous
 python-multipart
 pytest
 httpx
-stripe

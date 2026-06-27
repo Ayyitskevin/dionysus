@@ -24,11 +24,6 @@ def studio_checks() -> list[dict]:
 
 def production_checks() -> list[dict]:
     parsed = urlparse(config.BASE_URL)
-    stripe_prices = {
-        "restaurant_starter": config.STRIPE_PRICE_RESTAURANT_STARTER,
-        "restaurant_growth": config.STRIPE_PRICE_RESTAURANT_GROWTH,
-        "photographer_studio": config.STRIPE_PRICE_PHOTOGRAPHER_STUDIO,
-    }
     return [
         {
             "key": "secret_key",
@@ -44,21 +39,6 @@ def production_checks() -> list[dict]:
             "key": "cookie_secure",
             "ok": config.COOKIE_SECURE,
             "detail": "DIONYSUS_COOKIE_SECURE=true for production cookies",
-        },
-        {
-            "key": "stripe_secret",
-            "ok": bool(config.STRIPE_SECRET_KEY and config.STRIPE_SECRET_KEY.startswith("sk_")),
-            "detail": "DIONYSUS_STRIPE_SECRET_KEY is present",
-        },
-        {
-            "key": "stripe_webhook",
-            "ok": bool(config.STRIPE_WEBHOOK_SECRET and config.STRIPE_WEBHOOK_SECRET.startswith("whsec_")),
-            "detail": "DIONYSUS_STRIPE_WEBHOOK_SECRET is present",
-        },
-        {
-            "key": "stripe_prices",
-            "ok": all(v.startswith("price_") for v in stripe_prices.values()),
-            "detail": "all Stripe plan price IDs are configured",
         },
         {
             "key": "mise_bridge",

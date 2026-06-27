@@ -4,28 +4,11 @@
 <section class="page">
   <p class="eyebrow">{{ org.company or org.name }}</p>
   <h1>Billing</h1>
-  {% if checkout_status == "success" %}
-  <div class="notice success">
-    <strong>Checkout returned successfully.</strong>
-    <span>{% if subscription.status == "active" %}Your subscription is active.{% else %}Stripe will update this workspace as soon as the subscription webhook arrives.{% endif %}</span>
-  </div>
-  {% elif checkout_status == "cancel" %}
-  <div class="notice warning">
-    <strong>Checkout was canceled.</strong>
-    <span>No billing changes were made. You can reopen Stripe checkout whenever you are ready.</span>
-  </div>
-  {% endif %}
   <article class="card price">
     <h2>{{ subscription.plan_meta.name }}</h2>
     <strong>{{ subscription.plan_meta.price_cents|money }}/mo</strong>
     <p>Status: {{ subscription.status }}</p>
-    {% if subscription.configured %}
-      <form method="post" action="/w/{{ org.slug }}/billing/checkout">{{ csrf_input(request) }}
-        <button>Open Stripe checkout</button>
-      </form>
-    {% else %}
-      <p class="muted">Stripe keys and price IDs are not configured yet. This workspace is in trial mode.</p>
-    {% endif %}
+    <p class="muted">This workspace tracks its plan locally; there is no payment processor.</p>
   </article>
   <h2>Available plans</h2>
   <div class="grid">
@@ -33,7 +16,7 @@
       {% if plan.audience == org.audience %}
       <article class="card price {% if plan.key == subscription.plan %}current-plan{% elif plan.key == suggested_plan %}suggested-plan{% endif %}">
         <h3>{{ plan.name }}</h3>
-        {% if plan.key == suggested_plan and plan.key != subscription.plan %}<span class="plan-badge">Recommended upgrade</span>{% endif %}
+        {% if plan.key == suggested_plan and plan.key != subscription.plan %}<span class="plan-badge">Recommended</span>{% endif %}
         <strong>{{ plan.price_cents|money }}/mo</strong>
         <p>{{ plan.for }}</p>
         <ul>
@@ -44,11 +27,7 @@
         {% else %}
           <form method="post" action="/w/{{ org.slug }}/billing/plan">{{ csrf_input(request) }}
             <input type="hidden" name="plan" value="{{ plan.key }}">
-            {% if subscription.configured %}
-              <button name="checkout" value="1">Upgrade in Stripe</button>
-            {% else %}
-              <button>Switch trial plan</button>
-            {% endif %}
+            <button>Switch plan</button>
           </form>
         {% endif %}
       </article>

@@ -1424,21 +1424,16 @@ async def billing_page(request: Request, slug: str):
     suggested_plan = request.query_params.get("plan") or ""
     if suggested_plan not in plans.PLANS:
         suggested_plan = ""
-    checkout_status = request.query_params.get("checkout", "")
-    if checkout_status not in ("success", "cancel"):
-        checkout_status = ""
     return templates.TemplateResponse(request, "billing.html", {
         "org": org,
         "subscription": billing.checkout_state(org),
         "plans": plans.all_plans(),
         "suggested_plan": suggested_plan,
-        "checkout_status": checkout_status,
     })
 
 
 @app.post("/w/{slug}/billing/plan")
-async def choose_plan(request: Request, slug: str, plan: str = Form(...),
-                      checkout: str = Form("")):
+async def choose_plan(request: Request, slug: str, plan: str = Form(...)):
     org, user, _ = _require_owner(request, slug)
     plan = plans.normalize_plan(plan, org["audience"])
     if plans.PLANS[plan]["audience"] != org["audience"]:
@@ -1450,43 +1445,7 @@ async def choose_plan(request: Request, slug: str, plan: str = Form(...),
         actor_user_id=audit.actor_id(user), entity_type="subscription", entity_id=org["id"],
         summary=f"Selected {plans.PLANS[plan]['name']} plan.",
         details={"plan": plan, "previous_plan": org["plan"]})
-    if checkout:
-        fresh = _org_by_slug(slug)
-        url = billing.create_checkout_session(
-            fresh,
-            success_url=f"{config.BASE_URL}/w/{slug}/billing?checkout=success",
-            cancel_url=f"{config.BASE_URL}/w/{slug}/billing?checkout=cancel",
-        )
-        audit.log_event(
-            org["id"], "billing.checkout_started",
-            actor_user_id=audit.actor_id(user), entity_type="subscription", entity_id=org["id"],
-            summary=f"Started Stripe checkout for {plans.PLANS[plan]['name']}.",
-            details={"plan": plan})
-        return RedirectResponse(url, status_code=303)
     return RedirectResponse(f"/w/{slug}/billing", status_code=303)
-
-
-@app.post("/w/{slug}/billing/checkout")
-async def start_checkout(request: Request, slug: str):
-    org, user, _ = _require_owner(request, slug)
-    url = billing.create_checkout_session(
-        org,
-        success_url=f"{config.BASE_URL}/w/{slug}/billing?checkout=success",
-        cancel_url=f"{config.BASE_URL}/w/{slug}/billing?checkout=cancel",
-    )
-    state = billing.checkout_state(org)
-    audit.log_event(
-        org["id"], "billing.checkout_started",
-        actor_user_id=audit.actor_id(user), entity_type="subscription", entity_id=org["id"],
-        summary=f"Started Stripe checkout for {state['plan_meta']['name']}.",
-        details={"plan": state["plan"]})
-    return RedirectResponse(url, status_code=303)
-
-
-@app.post("/stripe/webhook")
-async def stripe_webhook(request: Request):
-    event = await billing.construct_webhook_event(request)
-    return billing.handle_event(event)
 
 
 def _correlation_id(body: dict) -> str | None:

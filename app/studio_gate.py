@@ -10,7 +10,6 @@ _BLOCKED_PREFIXES = (
     "/w/",
     "/invite/",
     "/share/",
-    "/stripe/",
 )
 _BLOCKED_EXACT = frozenset({
     "/login",

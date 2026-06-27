@@ -42,10 +42,6 @@ def configure_tmp_db(tmp_path, monkeypatch):
     config.MISE_IMPORT_TOKEN = "mise-test"
     config.BASE_URL = "http://localhost:8450"
     config.COOKIE_SECURE = False
-    config.STRIPE_SECRET_KEY = ""
-    config.STRIPE_PRICE_RESTAURANT_STARTER = ""
-    config.STRIPE_PRICE_RESTAURANT_GROWTH = ""
-    config.STRIPE_PRICE_PHOTOGRAPHER_STUDIO = ""
     db.migrate()
 
 
@@ -508,14 +504,12 @@ def test_plain_members_cannot_access_billing_money_path(tmp_path, monkeypatch):
         data={"plan": "restaurant_starter"},
         follow_redirects=False,
     )
-    checkout = member_client.post("/w/blue-plate/billing/checkout", follow_redirects=False)
 
     assert page.status_code == 200
     assert 'href="/w/blue-plate/billing"' not in page.text
     assert "Ask an owner or admin to manage billing." in page.text
     assert billing.status_code == 403
     assert plan.status_code == 403
-    assert checkout.status_code == 403
     org = db.one("SELECT * FROM organizations WHERE slug='blue-plate'")
     assert org["plan"] == "restaurant_growth"
 
@@ -1228,14 +1222,14 @@ def test_audit_detail_renders_event_details_for_owner_only(tmp_path, monkeypatch
     assert forbidden.status_code == 403
 
 
-def test_billing_page_shows_trial_when_stripe_unconfigured(tmp_path, monkeypatch):
+def test_billing_page_shows_local_plan_and_status(tmp_path, monkeypatch):
     configure_tmp_db(tmp_path, monkeypatch)
     client = TestClient(app)
     res = signup(client)
     billing = client.get("/w/blue-plate/billing")
     assert billing.status_code == 200
     assert "trialing" in billing.text
-    assert "Stripe keys" in billing.text
+    assert "no payment processor" in billing.text
 
 
 def test_mise_api_is_dormant_or_bearer_gated(tmp_path, monkeypatch):
@@ -1247,108 +1241,6 @@ def test_mise_api_is_dormant_or_bearer_gated(tmp_path, monkeypatch):
         headers={"Authorization": "Bearer mise-test"},
     ).status_code == 404
 
-
-
-def test_configured_stripe_checkout_redirects_to_session_url(tmp_path, monkeypatch):
-    configure_tmp_db(tmp_path, monkeypatch)
-    from app import billing, config
-    config.STRIPE_SECRET_KEY = "sk_test"
-    config.STRIPE_PRICE_RESTAURANT_GROWTH = "price_growth"
-
-    class FakeSession:
-        @staticmethod
-        def create(**kwargs):
-            assert kwargs["mode"] == "subscription"
-            assert kwargs["line_items"] == [{"price": "price_growth", "quantity": 1}]
-            assert kwargs["metadata"]["plan"] == "restaurant_growth"
-            return {"url": "https://checkout.stripe.test/session"}
-
-    class FakeStripe:
-        api_key = None
-        checkout = type("checkout", (), {"Session": FakeSession})
-
-    monkeypatch.setattr(billing, "_stripe", lambda: FakeStripe)
-    client = TestClient(app)
-    res = signup(client)
-    checkout = client.post("/w/blue-plate/billing/checkout", follow_redirects=False)
-    assert checkout.status_code == 303
-    assert checkout.headers["location"] == "https://checkout.stripe.test/session"
-    event = db.one("SELECT * FROM audit_events WHERE action='billing.checkout_started'")
-    assert event and "Restaurant Growth" in event["summary"]
-
-
-def test_stripe_webhook_marks_subscription_active(tmp_path, monkeypatch):
-    configure_tmp_db(tmp_path, monkeypatch)
-    from app import billing, config
-    config.STRIPE_WEBHOOK_SECRET = "whsec_test"
-    client = TestClient(app)
-    signup(client)
-    org = db.one("SELECT id FROM organizations WHERE slug='blue-plate'")
-
-    async def fake_construct(request):
-        return {
-            "type": "checkout.session.completed",
-            "data": {"object": {
-                "client_reference_id": str(org["id"]),
-                "customer": "cus_123",
-                "subscription": "sub_123",
-                "metadata": {"org_id": str(org["id"]), "plan": "restaurant_growth"},
-            }},
-        }
-
-    monkeypatch.setattr(billing, "construct_webhook_event", fake_construct)
-    res = client.post("/stripe/webhook", content=b"{}",
-                      headers={"stripe-signature": "sig"})
-    assert res.status_code == 200
-    sub = db.one("SELECT * FROM subscriptions WHERE org_id=?", (org["id"],))
-    assert sub["status"] == "active"
-    assert sub["stripe_customer_id"] == "cus_123"
-    assert sub["stripe_subscription_id"] == "sub_123"
-    event = db.one("SELECT * FROM audit_events WHERE action='billing.checkout_completed'")
-    assert event
-    assert event["actor_user_id"] is None
-    assert "subscription marked active" in event["summary"]
-    assert json.loads(event["details_json"])["status"] == "active"
-
-
-def test_stripe_webhook_accepts_stripe_event_objects(tmp_path, monkeypatch):
-    configure_tmp_db(tmp_path, monkeypatch)
-    from app import billing, config
-    config.STRIPE_WEBHOOK_SECRET = "whsec_test"
-    client = TestClient(app)
-    signup(client)
-    org = db.one("SELECT id FROM organizations WHERE slug='blue-plate'")
-
-    class FakeEvent:
-        def to_dict(self):
-            return {
-                "type": "checkout.session.completed",
-                "data": {"object": {
-                    "client_reference_id": str(org["id"]),
-                    "customer": "cus_obj",
-                    "subscription": "sub_obj",
-                    "metadata": {"org_id": str(org["id"]), "plan": "restaurant_growth"},
-                }},
-            }
-
-    class FakeWebhook:
-        @staticmethod
-        def construct_event(payload, sig, secret):
-            assert secret == "whsec_test"
-            assert sig == "sig"
-            return FakeEvent()
-
-    class FakeStripe:
-        Webhook = FakeWebhook
-
-    monkeypatch.setattr(billing, "_stripe", lambda: FakeStripe)
-    res = client.post("/stripe/webhook", content=b"{}",
-                      headers={"stripe-signature": "sig"})
-    assert res.status_code == 200
-    sub = db.one("SELECT * FROM subscriptions WHERE org_id=?", (org["id"],))
-    assert sub["status"] == "active"
-    assert sub["stripe_customer_id"] == "cus_obj"
-    assert sub["stripe_subscription_id"] == "sub_obj"
 
 
 def test_healthz_reports_global_queue_health(tmp_path, monkeypatch):
@@ -1401,11 +1293,6 @@ def test_readiness_fails_with_default_dev_config(tmp_path, monkeypatch):
     config.SECRET_KEY = "dev-dionysus-secret"
     config.BASE_URL = "http://localhost:8450"
     config.COOKIE_SECURE = False
-    config.STRIPE_SECRET_KEY = ""
-    config.STRIPE_WEBHOOK_SECRET = ""
-    config.STRIPE_PRICE_RESTAURANT_STARTER = ""
-    config.STRIPE_PRICE_RESTAURANT_GROWTH = ""
-    config.STRIPE_PRICE_PHOTOGRAPHER_STUDIO = ""
     config.MISE_IMPORT_TOKEN = ""
     client = TestClient(app)
     res = client.get("/readiness")
@@ -1421,11 +1308,6 @@ def test_readiness_passes_when_production_env_is_armed(tmp_path, monkeypatch):
     config.SECRET_KEY = "a-real-secret-value"
     config.BASE_URL = "https://platekit.example.com"
     config.COOKIE_SECURE = True
-    config.STRIPE_SECRET_KEY = "sk_test_123"
-    config.STRIPE_WEBHOOK_SECRET = "whsec_123"
-    config.STRIPE_PRICE_RESTAURANT_STARTER = "price_123"
-    config.STRIPE_PRICE_RESTAURANT_GROWTH = "price_456"
-    config.STRIPE_PRICE_PHOTOGRAPHER_STUDIO = "price_789"
     config.MISE_IMPORT_TOKEN = "mise-token"
     client = TestClient(app)
     res = client.get("/readiness")
@@ -1695,22 +1577,6 @@ def test_workspace_surfaces_upgrade_prompt_for_locked_recipe(tmp_path, monkeypat
     page = client.get("/w/blue-plate")
     assert page.status_code == 200
     assert "Unlock Seasonal Press Kit with Restaurant Growth" in page.text
-
-
-def test_billing_checkout_return_banners(tmp_path, monkeypatch):
-    configure_tmp_db(tmp_path, monkeypatch)
-    client = TestClient(app)
-    res = signup(client)
-
-    success = client.get("/w/blue-plate/billing?checkout=success")
-    assert success.status_code == 200
-    assert "Checkout returned successfully." in success.text
-    assert "subscription webhook arrives" in success.text
-
-    cancel = client.get("/w/blue-plate/billing?checkout=cancel")
-    assert cancel.status_code == 200
-    assert "Checkout was canceled." in cancel.text
-    assert "No billing changes were made" in cancel.text
 
 
 def test_billing_can_switch_trial_plan(tmp_path, monkeypatch):
