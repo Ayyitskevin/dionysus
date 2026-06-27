@@ -1,0 +1,117 @@
+"""Model-backed pack generation with deterministic fallback (mock-only)."""
+
+import json
+
+from fastapi.testclient import TestClient
+
+from app import config, db, generator, model_client
+from app.main import app
+from tests.test_app import configure_tmp_db, signup
+
+
+# --- parser units --------------------------------------------------------------
+
+def test_parse_model_pack_plain_json():
+    parsed = generator._parse_model_pack(
+        '{"strategy": "Lead with the tasting menu.", "captions": ["A", "B"]}')
+    assert parsed == {"strategy": "Lead with the tasting menu.", "captions": ["A", "B"]}
+
+
+def test_parse_model_pack_fenced_json():
+    text = '```json\n{"strategy": "S", "captions": ["c1", "c2"]}\n```'
+    parsed = generator._parse_model_pack(text)
+    assert parsed["strategy"] == "S"
+    assert parsed["captions"] == ["c1", "c2"]
+
+
+def test_parse_model_pack_with_surrounding_prose():
+    text = 'Sure! Here is the JSON: {"strategy": "S", "captions": ["c"]} hope it helps'
+    assert generator._parse_model_pack(text) == {"strategy": "S", "captions": ["c"]}
+
+
+def test_parse_model_pack_rejects_incomplete():
+    assert generator._parse_model_pack('{"strategy": "", "captions": []}') is None
+    assert generator._parse_model_pack("not json at all") is None
+    assert generator._parse_model_pack('{"strategy": "ok"}') is None  # no captions
+
+
+def test_parse_model_pack_caps_captions():
+    captions = [f"c{i}" for i in range(20)]
+    parsed = generator._parse_model_pack(
+        json.dumps({"strategy": "s", "captions": captions}))
+    assert len(parsed["captions"]) == generator._MAX_MODEL_CAPTIONS
+
+
+# --- end-to-end generation -----------------------------------------------------
+
+def _enable_model(monkeypatch):
+    monkeypatch.setattr(config, "MODEL_ENDPOINT", "http://local/v1")
+    monkeypatch.setattr(config, "MODEL_NAME", "llama3.1:8b")
+
+
+def test_generate_uses_model_when_enabled(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    _enable_model(monkeypatch)
+
+    def fake_complete(messages, **kwargs):
+        return {
+            "text": json.dumps({
+                "strategy": "Model-written strategy.",
+                "captions": ["Model caption one.", "Model caption two."],
+            }),
+            "model": "llama3.1:8b",
+            "latency_ms": 42,
+            "cost_usd": 0.0,
+        }
+
+    monkeypatch.setattr(model_client, "complete", fake_complete)
+    client = TestClient(app)
+    signup(client)  # enqueues + drains the seed generate job
+
+    pack = db.one("SELECT * FROM content_packs ORDER BY id DESC LIMIT 1")
+    body = json.loads(pack["body_json"])
+    assert body["strategy"] == "Model-written strategy."
+    assert body["captions"] == ["Model caption one.", "Model caption two."]
+    assert pack["ai_model"] == "llama3.1:8b"
+    assert body["provenance"]["engine"] == "dionysus-local-model"
+    assert body["provenance"]["model"] == "llama3.1:8b"
+    assert body["provenance"]["latency_ms"] == 42
+
+    res = client.get(
+        "/api/mise/organizations/blue-plate/packs?include_drafts=true",
+        headers={"Authorization": "Bearer mise-test"})
+    env = res.json()["packs"][0]["contract"]
+    assert env["model"] == "llama3.1:8b"
+    assert env["latency_ms"] == 42
+    assert env["cost_usd"] == 0.0
+
+
+def test_generate_falls_back_when_model_fails(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    _enable_model(monkeypatch)
+    monkeypatch.setattr(model_client, "complete", lambda *a, **k: None)
+    client = TestClient(app)
+    signup(client)
+
+    pack = db.one("SELECT * FROM content_packs ORDER BY id DESC LIMIT 1")
+    body = json.loads(pack["body_json"])
+    assert body["provenance"]["engine"] != "dionysus-local-model"
+    assert pack["ai_model"] == body["provenance"]["engine"]
+
+
+def test_generate_skips_model_when_disabled(tmp_path, monkeypatch):
+    configure_tmp_db(tmp_path, monkeypatch)
+    # endpoint unset -> is_enabled() is False -> complete() is never reached
+    calls = {"n": 0}
+
+    def tripwire(*args, **kwargs):
+        calls["n"] += 1
+        return None
+
+    monkeypatch.setattr(model_client, "complete", tripwire)
+    client = TestClient(app)
+    signup(client)
+
+    assert calls["n"] == 0
+    pack = db.one("SELECT * FROM content_packs ORDER BY id DESC LIMIT 1")
+    assert json.loads(pack["body_json"])["provenance"]["engine"] != "dionysus-local-model"

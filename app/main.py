@@ -20,8 +20,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import (
     audit, billing, config, contract, db, generator, jobs, mise_hook,
-    packs as pack_utils, plans, rate_limit, readiness, recipes, security,
-    studio_gate,
+    model_client, packs as pack_utils, plans, rate_limit, readiness, recipes,
+    security, studio_gate,
 )
 from .render import ROOT, templates
 
@@ -105,6 +105,11 @@ async def healthz():
         "jobs_failed": jobs.failed_count(),
         "queue": jobs.queue_stats(),
         "studio_mode": config.STUDIO_MODE,
+        "model": {
+            "enabled": model_client.is_enabled(),
+            "name": config.MODEL_NAME or None,
+            "endpoint_configured": bool(config.MODEL_ENDPOINT),
+        },
         "studio": {
             "mise_bridge_armed": bool(config.MISE_IMPORT_TOKEN),
             "demo_org": "blue-plate",
@@ -1505,10 +1510,8 @@ def _pack_api_payload(pack) -> dict:
         "archived_at": pack["archived_at"],
         "markdown": pack_utils.markdown(pack),
         "body": body,
-        "contract": contract.envelope(
-            contract.drafts_from_pack(body, title=pack["title"]),
-            model=pack["ai_model"] or contract.LOCAL_MODEL,
-        ),
+        "contract": contract.envelope_for_pack(
+            body, title=pack["title"], ai_model=pack["ai_model"]),
     }
 
 

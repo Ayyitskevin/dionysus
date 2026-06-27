@@ -6,8 +6,13 @@ output with provenance, never treated as approved human work.
 """
 
 import json
+import logging
 
-from . import db
+from . import db, model_client
+
+log = logging.getLogger("dionysus.generator")
+
+_MAX_MODEL_CAPTIONS = 6
 
 
 def _menu_lines(org_id: int) -> list[str]:
@@ -214,3 +219,98 @@ def regenerate_with_feedback(org, source_pack, feedback: str) -> dict:
         "argus": source.get("argus"),
         "provenance": provenance,
     }
+
+
+def _model_messages(org, campaign, recipe, pack, argus_context) -> list[dict]:
+    menu = ", ".join(_menu_lines(org["id"])[:6])
+    voice = org["brand_voice"] or "warm, specific, restaurant-native"
+    goal = campaign["goal"] or "turn this shoot into reusable marketing"
+    keywords = ", ".join(((argus_context or {}).get("top_keywords") or [])[:5])
+    caption_count = max(len(_text_list(pack.get("captions"))) or 3, 1)
+    system = (
+        "You are a marketing copywriter for a single restaurant/photography "
+        "studio. Write concise, specific, brand-true copy. Never invent prices, "
+        "menu items, or facts that were not provided. Respond with ONLY a JSON "
+        "object, no prose and no markdown fences."
+    )
+    user = (
+        f"Business: {org['name']} (audience: {org['audience']}).\n"
+        f"Brand voice: {voice}.\n"
+        f"Campaign: {campaign['title']} — goal: {goal}.\n"
+        f"Content recipe: {recipe['name']}.\n"
+        f"Menu / subjects: {menu}.\n"
+        + (f"Vision keywords: {keywords}.\n" if keywords else "")
+        + 'Return JSON of exactly this shape: '
+        '{"strategy": "one or two sentences", "captions": '
+        f'[{caption_count} short, ready-to-post social captions]}}.'
+    )
+    return [{"role": "system", "content": system},
+            {"role": "user", "content": user}]
+
+
+def _strip_fences(text: str) -> str:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+        if cleaned[:4].lower() == "json":
+            cleaned = cleaned[4:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
+    return cleaned.strip()
+
+
+def _parse_model_pack(text: str) -> dict | None:
+    """Parse a model reply into {strategy, captions}, tolerating fenced JSON."""
+    stripped = _strip_fences(text)
+    candidates = [text, stripped]
+    if "{" in stripped and "}" in stripped:
+        candidates.append(stripped[stripped.find("{"): stripped.rfind("}") + 1])
+    for candidate in candidates:
+        try:
+            data = json.loads(candidate)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        strategy = str(data.get("strategy") or "").strip()
+        captions = _text_list(data.get("captions"))[:_MAX_MODEL_CAPTIONS]
+        if strategy and captions:
+            return {"strategy": strategy, "captions": captions}
+    return None
+
+
+def enrich_pack_with_model(pack, *, org, campaign, recipe,
+                           argus_context: dict | None = None) -> dict | None:
+    """Overlay model-written strategy + captions onto a deterministic pack.
+
+    Returns a new pack dict on success, or ``None`` to keep the deterministic
+    pack. Any failure (disabled endpoint, network error, unparseable reply)
+    yields ``None`` and is swallowed — drafting never crashes the job.
+    """
+    if not model_client.is_enabled():
+        return None
+    try:
+        result = model_client.complete(
+            _model_messages(org, campaign, recipe, pack, argus_context))
+        if not result:
+            return None
+        parsed = _parse_model_pack(result["text"])
+        if not parsed:
+            return None
+        enriched = dict(pack)
+        enriched["strategy"] = parsed["strategy"]
+        enriched["captions"] = parsed["captions"]
+        provenance = dict(pack.get("provenance") or {})
+        provenance.update({
+            "engine": "dionysus-local-model",
+            "template_engine": (pack.get("provenance") or {}).get("engine"),
+            "model": result["model"],
+            "latency_ms": result["latency_ms"],
+            "cost_usd": result["cost_usd"],
+        })
+        enriched["provenance"] = provenance
+        return enriched
+    except Exception:  # never let drafting crash the worker
+        log.warning("model enrichment failed; using deterministic pack",
+                    exc_info=True)
+        return None

@@ -334,13 +334,18 @@ def _execute_generate(payload: dict) -> int:
         except argus.ArgusError:
             log.warning("argus enrichment skipped for run %s", run_id, exc_info=True)
     pack = generator.build_pack(org, campaign, recipe, argus_context=argus_ctx)
+    enriched = generator.enrich_pack_with_model(
+        pack, org=org, campaign=campaign, recipe=recipe, argus_context=argus_ctx)
+    if enriched:
+        pack = enriched
+    ai_model = pack["provenance"].get("model") or pack["provenance"]["engine"]
     with db.tx() as con:
         cur = con.execute("""INSERT INTO content_packs
                              (org_id, campaign_id, recipe_id, title, body_json,
                               ai_model, ai_draft_original)
                              VALUES (?,?,?,?,?,?,?)""",
                           (org["id"], campaign["id"], recipe["id"], pack["headline"],
-                           json.dumps(pack), pack["provenance"]["engine"], json.dumps(pack)))
+                           json.dumps(pack), ai_model, json.dumps(pack)))
         con.execute("UPDATE campaigns SET status='generated' WHERE id=?",
                     (campaign["id"],))
         return cur.lastrowid

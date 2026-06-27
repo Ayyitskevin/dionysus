@@ -28,6 +28,17 @@ ARGUS_URL = os.environ.get("DIONYSUS_ARGUS_URL", "").rstrip("/")
 ARGUS_API_TOKEN = os.environ.get("DIONYSUS_ARGUS_API_TOKEN", "")
 ARGUS_TIMEOUT = int(os.environ.get("DIONYSUS_ARGUS_TIMEOUT", "15"))
 
+# Local content model (OpenAI-compatible /v1/chat/completions). Provider-neutral:
+# Ollama, llama.cpp, vLLM, and LM Studio all expose this shape. Disabled when the
+# endpoint or name is empty -> the deterministic templates in generator.py are
+# used instead, so generation never depends on a cloud model and CI runs offline.
+MODEL_ENDPOINT = os.environ.get("DIONYSUS_MODEL_ENDPOINT", "").rstrip("/")
+MODEL_NAME = os.environ.get("DIONYSUS_MODEL_NAME", "")
+MODEL_API_KEY = os.environ.get("DIONYSUS_MODEL_API_KEY", "")
+MODEL_TIMEOUT = float(os.environ.get("DIONYSUS_MODEL_TIMEOUT", "30"))
+MODEL_MAX_TOKENS = int(os.environ.get("DIONYSUS_MODEL_MAX_TOKENS", "800"))
+MODEL_TEMPERATURE = float(os.environ.get("DIONYSUS_MODEL_TEMPERATURE", "0.4"))
+
 JOB_WORKER_POLL_SECONDS = float(os.environ.get("DIONYSUS_WORKER_POLL_SECONDS", "2"))
 JOB_STALE_SECONDS = int(os.environ.get("DIONYSUS_JOB_STALE_SECONDS", "900"))
 
