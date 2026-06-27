@@ -88,6 +88,22 @@ def active_generate_job_id(
     )
 
 
+def reusable_generate_job(campaign_id: int, recipe_id: int, *,
+                          argus_run_id: int | None = None) -> dict | None:
+    """Return an existing generate job for this identity that must NOT be re-run:
+    a queued/running job, or a done job that produced a pack. Returns None when
+    there is no job or only failed ones (the caller may enqueue a fresh attempt).
+    Used to make the argus-pack hook idempotent across completed runs."""
+    key = _generate_idempotency_key(campaign_id, recipe_id, argus_run_id)
+    row = db.one("""SELECT * FROM jobs
+                    WHERE idempotency_key=?
+                      AND (status IN ('queued','running')
+                           OR (status='done' AND result_pack_id IS NOT NULL))
+                    ORDER BY CASE status WHEN 'done' THEN 0 ELSE 1 END, id DESC
+                    LIMIT 1""", (key,))
+    return _job(row) if row else None
+
+
 def active_regenerate_job_id(source_pack_id: int, feedback: str) -> int | None:
     key = _regenerate_idempotency_key(source_pack_id, feedback)
     return _active_job_id(key) or _active_legacy_job_id(

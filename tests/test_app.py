@@ -1668,7 +1668,7 @@ def test_cli_backup_creates_private_verified_snapshot(tmp_path, monkeypatch, cap
     assert cli.main(["backup", str(destination)]) == 0
     output = capsys.readouterr().out
     assert "backup\t" in output
-    assert "restore_check\tok\tintegrity=ok\tmigrations=10" in output
+    assert "restore_check\tok\tintegrity=ok\tmigrations=11" in output
 
     snapshots = list(destination.glob("dionysus-*.db"))
     assert len(snapshots) == 1
@@ -1685,7 +1685,7 @@ def test_cli_backup_creates_private_verified_snapshot(tmp_path, monkeypatch, cap
 
     assert cli.main(["verify-backup", str(snapshots[0])]) == 0
     verify_output = capsys.readouterr().out
-    assert "verify\tok\tintegrity=ok\tmigrations=10" in verify_output
+    assert "verify\tok\tintegrity=ok\tmigrations=11" in verify_output
 
 
 def test_workspace_surfaces_upgrade_prompt_for_locked_recipe(tmp_path, monkeypatch):
