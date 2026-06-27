@@ -134,8 +134,8 @@ The app exposes `/readiness` and a CLI gate:
 python -m app.cli check-production
 ```
 
-The gate fails until production secrets, HTTPS base URL, secure cookies, Stripe
-keys, Stripe price IDs, webhook secret, and Mise bridge token are configured.
+The gate fails until production secrets, an HTTPS base URL, secure cookies, and
+the Mise bridge token are configured.
 Run the queue worker separately from the web process:
 
 ```bash
