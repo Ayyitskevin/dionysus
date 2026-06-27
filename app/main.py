@@ -1489,6 +1489,17 @@ async def stripe_webhook(request: Request):
     return billing.handle_event(event)
 
 
+def _correlation_id(body: dict) -> str | None:
+    """Optional Mise correlation id, echoed back so Mise can tie a draft to the
+    originating request."""
+    value = body.get("correlation_id")
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise HTTPException(status_code=400, detail="correlation_id must be a string")
+    return value.strip() or None
+
+
 def _pack_api_payload(pack) -> dict:
     share_url = None
     if pack["share_token"]:
@@ -1619,7 +1630,7 @@ async def mise_print_pitch(slug: str, request: Request):
         argus_run_id=argus_run_id,
     )
     latency_ms = int((time.perf_counter() - start) * 1000)
-    return {
+    response = {
         "ok": True,
         "org": slug,
         **pitch,
@@ -1628,6 +1639,10 @@ async def mise_print_pitch(slug: str, request: Request):
             latency_ms=latency_ms,
         ),
     }
+    correlation_id = _correlation_id(body)
+    if correlation_id:
+        response["correlation_id"] = correlation_id
+    return response
 
 
 @app.post("/api/mise/organizations/{slug}/argus-pack",
@@ -1663,6 +1678,7 @@ async def mise_argus_pack_hook(slug: str, request: Request):
     recipe_slug = body.get("recipe_slug")
     if recipe_slug is not None and not isinstance(recipe_slug, str):
         raise HTTPException(status_code=400, detail="recipe_slug must be a string")
+    correlation_id = _correlation_id(body)
     try:
         result = mise_hook.generate_from_argus(
             org,
@@ -1670,6 +1686,7 @@ async def mise_argus_pack_hook(slug: str, request: Request):
             mise_gallery_id=mise_gallery_id,
             gallery_title=gallery_title,
             recipe_slug=(recipe_slug or "").strip() or None,
+            correlation_id=correlation_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
